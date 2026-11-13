@@ -22,7 +22,7 @@ Deploy and Settings — and starts on Code:
 - **File tree** (middle): the changed files of the selected entry in their folders, or every
   file. Checkboxes choose what goes into the next commit; right-click to discard, ignore,
   restore an old version, view history or blame.
-- **File pane** (right): the diff with line numbers — right-click a line, a selection or a hunk
+- **File pane** (right): the diff with line numbers and syntax highlighting — right-click a line, a selection or a hunk
   to discard just that change — or a rendered preview (Markdown is rendered), or an editor with
   syntax highlighting and line numbers (Ctrl+S saves, also on SSH hosts).
 - **Commit composer**: leave the summary empty and it uses “Update <file names>”.

@@ -76,8 +76,9 @@ fn tags() -> gtk::TextTagTable {
     t
 }
 
-fn recolor(t: &gtk::TextTagTable) {
-    let fg = theme_color("");
+/// Colour the diff tags. `fg` must come from a widget in the window, so it follows a
+/// colour scheme forced in Preferences.
+fn recolor(t: &gtk::TextTagTable, fg: gdk::RGBA) {
     if let Some(tag) = t.lookup("added") {
         tag.set_paragraph_background_rgba(Some(&tinted(theme_color("success"), 0.16)));
     }
@@ -271,7 +272,6 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     bar.append(&save_btn);
 
     let tags = tags();
-    recolor(&tags);
     let diff_view = code_view(false, Some(&tags));
     let preview = adw::Bin::new();
     let editor = editor::view(true);
@@ -387,11 +387,19 @@ impl Code {
                 }
             }};
         }
-        let tags = self.tags.clone();
-        adw::StyleManager::default().connect_dark_notify(move |_| {
-            let t = tags.clone();
-            glib::idle_add_local_once(move || recolor(&t));
-        });
+        {
+            let w = w.clone();
+            adw::StyleManager::default().connect_dark_notify(move |_| {
+                let w = w.clone();
+                glib::idle_add_local_once(move || {
+                    if let Some(v) = w.upgrade()
+                        && v.mode.active_name().as_deref() == Some("diff")
+                    {
+                        v.load_mode();
+                    }
+                });
+            });
+        }
         self.search
             .connect_search_changed(with!(|v: &Rc<Code>| v.load_timeline(0)));
         self.more.connect_clicked(with!(|v: &Rc<Code>| {
@@ -1075,6 +1083,7 @@ impl Code {
     }
 
     fn render_diff(&self, text: &str) {
+        recolor(&self.tags, self.diff_view.color());
         let file = git_backend::parse_diff(text).into_iter().next();
         let buf = self.diff_view.buffer();
         buf.set_text("");
@@ -1094,6 +1103,11 @@ impl Code {
             }
             Some(f) => {
                 let mut first = true;
+                let path = self.current.borrow().clone().unwrap_or_default();
+                // (offset of the line's marker char, is_new_side, index within that side)
+                let mut spots: Vec<(i32, bool, usize)> = Vec::new();
+                let mut old_side: Vec<String> = Vec::new();
+                let mut new_side: Vec<String> = Vec::new();
                 for (h, hunk) in f.hunks.iter().enumerate() {
                     let mut lines = hunk.split_inclusive('\n');
                     let head = lines.next().unwrap_or_default();
@@ -1132,7 +1146,29 @@ impl Code {
                             &format!("{o:>5} {n:>5}  "),
                             &["gutter"],
                         );
+                        let content_off = end.offset();
                         buf.insert(&mut end, line.trim_end_matches('\n'));
+                        let body = line
+                            .trim_end_matches('\n')
+                            .get(1..)
+                            .unwrap_or("")
+                            .to_owned();
+                        match kind {
+                            b'+' => {
+                                spots.push((content_off, true, new_side.len()));
+                                new_side.push(body);
+                            }
+                            b'-' => {
+                                spots.push((content_off, false, old_side.len()));
+                                old_side.push(body);
+                            }
+                            b'\\' => {}
+                            _ => {
+                                spots.push((content_off, true, new_side.len()));
+                                new_side.push(body.clone());
+                                old_side.push(body);
+                            }
+                        }
                         if let Some(t) = tag {
                             let s = buf.iter_at_offset(start_off);
                             let e = buf.end_iter();
@@ -1140,12 +1176,60 @@ impl Code {
                         }
                         map.push(Some((h, i)));
                     }
+                    // A blank line between hunks keeps their syntax state apart.
+                    old_side.push(String::new());
+                    new_side.push(String::new());
                 }
+                self.apply_syntax(&path, &spots, &old_side, &new_side);
             }
         }
         *self.diff_file.borrow_mut() = file;
         *self.line_map.borrow_mut() = map;
         self.pane.set_visible_child_name("diff");
+    }
+
+    /// Copy syntax colours from both sides of the diff onto the diff buffer.
+    fn apply_syntax(
+        &self,
+        path: &str,
+        spots: &[(i32, bool, usize)],
+        old: &[String],
+        new: &[String],
+    ) {
+        let olds: Vec<&str> = old.iter().map(String::as_str).collect();
+        let news: Vec<&str> = new.iter().map(String::as_str).collect();
+        let old_hl = editor::highlight(path, &olds);
+        let new_hl = editor::highlight(path, &news);
+        let buf = self.diff_view.buffer();
+        let table = buf.tag_table();
+        for &(off, is_new, idx) in spots {
+            let spans = if is_new {
+                new_hl.get(idx)
+            } else {
+                old_hl.get(idx)
+            };
+            for (a, b, style) in spans.into_iter().flatten() {
+                let key = style.key();
+                let tag = table.lookup(&key).unwrap_or_else(|| {
+                    let t = gtk::TextTag::new(Some(&key));
+                    if let Some(fg) = style.fg {
+                        t.set_foreground_rgba(Some(&fg));
+                    }
+                    if style.bold {
+                        t.set_weight(700);
+                    }
+                    if style.italic {
+                        t.set_style(gtk::pango::Style::Italic);
+                    }
+                    table.add(&t);
+                    t
+                });
+                // +1 skips the diff marker (+, - or space).
+                let s = buf.iter_at_offset(off + 1 + *a as i32);
+                let e = buf.iter_at_offset(off + 1 + *b as i32);
+                buf.apply_tag(&tag, &s, &e);
+            }
+        }
     }
 
     fn save(self: &Rc<Self>) {
