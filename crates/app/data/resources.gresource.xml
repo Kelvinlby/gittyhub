@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/io/github/Kelvinlby/GittyHub">
+    <file>style.css</file>
+    <file>icons/scalable/actions/gh-branch-symbolic.svg</file>
+    <file>icons/scalable/actions/gh-commit-symbolic.svg</file>
+    <file>icons/scalable/actions/gh-pull-request-symbolic.svg</file>
+    <file>icons/scalable/actions/gh-issue-symbolic.svg</file>
+    <file>icons/scalable/actions/gh-tag-symbolic.svg</file>
+    <file>icons/scalable/actions/gh-stash-symbolic.svg</file>
+    <file>icons/scalable/actions/gh-actions-symbolic.svg</file>
+    <file>icons/scalable/actions/gh-package-symbolic.svg</file>
+    <file>icons/scalable/actions/gh-deploy-symbolic.svg</file>
+    <file>icons/scalable/actions/gh-external-symbolic.svg</file>
+    <file>icons/scalable/actions/gh-github-symbolic.svg</file>
+    <file>icons/scalable/actions/gh-server-symbolic.svg</file>
+  </gresource>
+</gresources>

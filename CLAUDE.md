@@ -31,6 +31,19 @@ A Git client with deep GitHub integration, aiming to grow into sub-IDE-grade sof
   when it makes things clearly neater or enables something `gh` can't do. Document the reason when doing so.
 - Backend crates must stay free of GTK dependencies so they can be tested headlessly.
 
+## Architecture notes
+
+- `git_backend::Location` is either `Local(path)` or `Ssh { host, path }`; every git function takes
+  one. SSH runs `git` on the host via the system `ssh` (BatchMode, connection sharing) — never
+  read or manage keys. `tests/ssh_transport.rs` checks quoting with a fake `ssh`.
+- GitHub calls always pass an explicit `-R owner/name` (derived from the `origin`/`upstream`
+  remote), so they run locally even for SSH-hosted checkouts.
+- App: `repo::Ctx` is the per-tab context (location, slug, status, toasts); use `ctx.load` for
+  reads, `ctx.git` for repo-changing ops (shows errors, then refreshes), `ctx.gh` / `ctx.gh_load`
+  for GitHub. Each sidebar section is a `views::*` module implementing `repo::View`.
+- Custom icons live in `crates/app/data/icons` and must be fill-only SVGs (GTK's symbolic
+  loader ignores strokes).
+
 ## Workflow
 
 - Commit and push to `origin/main` whenever a change is meaningful and complete (builds, passes

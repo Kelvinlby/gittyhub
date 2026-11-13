@@ -1,0 +1,75 @@
+/* GittyHub styles. Colours come from libadwaita's CSS variables only. */
+
+.diff-view {
+  font-family: monospace;
+  font-size: 0.92em;
+}
+
+.diff-file-header {
+  padding: 6px 12px;
+  font-weight: bold;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.diff-hunk-header {
+  padding: 2px 6px 2px 12px;
+  background: color-mix(in srgb, var(--accent-bg-color) 10%, transparent);
+  opacity: 0.85;
+}
+
+.status-letter {
+  font-family: monospace;
+  font-weight: bold;
+  min-width: 1.6em;
+  border-radius: 4px;
+  padding: 0 2px;
+}
+.status-letter.added { color: var(--success-color); }
+.status-letter.modified { color: var(--warning-color); }
+.status-letter.deleted { color: var(--error-color); }
+.status-letter.renamed { color: var(--accent-color); }
+.status-letter.conflict { color: var(--error-color); }
+
+.pill-label {
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 0.85em;
+  font-weight: bold;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.pill-label.accent { color: var(--accent-color); }
+.pill-label.success { color: var(--success-color); }
+.pill-label.error { color: var(--error-color); }
+.pill-label.warning { color: var(--warning-color); }
+.pill-label.merged { color: var(--purple-3, var(--accent-color)); }
+
+.commit-box {
+  padding: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.commit-description {
+  min-height: 72px;
+}
+
+.markdown-body {
+  padding: 12px;
+}
+
+.comment-card {
+  padding: 12px;
+}
+
+.accent-swatch {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 999px;
+}
+.accent-swatch:checked {
+  box-shadow: 0 0 0 3px var(--window-bg-color), 0 0 0 5px var(--window-fg-color);
+}
+
+.mono {
+  font-family: monospace;
+}

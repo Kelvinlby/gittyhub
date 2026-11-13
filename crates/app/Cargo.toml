@@ -3,10 +3,13 @@ name = "gittyhub"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+build = "build.rs"
 
 [dependencies]
 gtk.workspace = true
 adw.workspace = true
 anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 git-backend.workspace = true
 gh-backend.workspace = true

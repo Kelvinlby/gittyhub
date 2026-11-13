@@ -232,6 +232,7 @@ name = "git-backend"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "serde",
 ]
 
 [[package]]
@@ -243,6 +244,8 @@ dependencies = [
  "git-backend",
  "gtk4",
  "libadwaita",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
