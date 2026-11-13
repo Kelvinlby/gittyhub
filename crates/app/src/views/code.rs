@@ -19,7 +19,7 @@ use crate::form::{self, Field};
 use crate::repo::{Ctx, View};
 use crate::tree::FileTree;
 use crate::util::{self, Callback};
-use crate::{markdown, settings};
+use crate::{editor, markdown, settings};
 
 const PAGE: usize = 150;
 const MAX_VIEW: usize = 4 * 1024 * 1024;
@@ -54,7 +54,7 @@ pub struct Code {
     diff_view: gtk::TextView,
     tags: gtk::TextTagTable,
     preview: adw::Bin,
-    editor: gtk::TextView,
+    editor: sourceview::View,
     sel: RefCell<Sel>,
     commits: RefCell<Vec<Commit>>,
     unpushed: RefCell<HashSet<String>>,
@@ -274,7 +274,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     recolor(&tags);
     let diff_view = code_view(false, Some(&tags));
     let preview = adw::Bin::new();
-    let editor = code_view(true, None);
+    let editor = editor::view(true);
     let empty = util::status_page(
         "gh-code-symbolic",
         "No File Selected",
@@ -1003,10 +1003,7 @@ impl Code {
                             })
                         }) {
                             Ok(text) => {
-                                let buf = v.editor.buffer();
-                                buf.set_text(&text);
-                                buf.place_cursor(&buf.start_iter());
-                                buf.set_modified(false);
+                                editor::set_text(&v.editor, &path, &text);
                                 *v.editor_path.borrow_mut() = Some(path);
                                 v.save_btn.set_sensitive(false);
                                 v.pane.set_visible_child_name("edit");
@@ -1063,19 +1060,8 @@ impl Code {
                 md.set_margin_end(32);
                 self.preview.set_child(Some(&scrolled(&md)));
             } else {
-                let view = code_view(false, Some(&self.tags));
-                let buf = view.buffer();
-                let width = text.lines().count().to_string().len().max(3);
-                for (i, line) in text.split_inclusive('\n').enumerate() {
-                    let mut end = buf.end_iter();
-                    buf.insert_with_tags_by_name(
-                        &mut end,
-                        &format!("{:>width$}  ", i + 1),
-                        &["gutter"],
-                    );
-                    let mut end = buf.end_iter();
-                    buf.insert(&mut end, line);
-                }
+                let view = editor::view(false);
+                editor::set_text(&view, path, &text);
                 self.preview.set_child(Some(&scrolled(&view)));
             }
         } else {

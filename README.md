@@ -23,8 +23,8 @@ Deploy and Settings — and starts on Code:
   file. Checkboxes choose what goes into the next commit; right-click to discard, ignore,
   restore an old version, view history or blame.
 - **File pane** (right): the diff with line numbers — right-click a line, a selection or a hunk
-  to discard just that change — or a rendered preview (Markdown is rendered), or an editor
-  (Ctrl+S saves, also on SSH hosts).
+  to discard just that change — or a rendered preview (Markdown is rendered), or an editor with
+  syntax highlighting and line numbers (Ctrl+S saves, also on SSH hosts).
 - **Commit composer**: leave the summary empty and it uses “Update <file names>”.
 
 Also:
@@ -45,10 +45,10 @@ Also:
 
 - Rust stable (pinned via `rust-toolchain.toml`)
 - `git` and `gh` on your `PATH` (run `gh auth login` once)
-- Linux with GTK ≥ 4.18 and libadwaita ≥ 1.8 development packages
-  (Debian/Ubuntu: `sudo apt install libgtk-4-dev libadwaita-1-dev`,
-  Fedora: `sudo dnf install gtk4-devel libadwaita-devel`,
-  Arch: `sudo pacman -S gtk4 libadwaita`)
+- Linux with GTK ≥ 4.18, libadwaita ≥ 1.8 and GtkSourceView 5 development packages
+  (Debian/Ubuntu: `sudo apt install libgtk-4-dev libadwaita-1-dev libgtksourceview-5-dev`,
+  Fedora: `sudo dnf install gtk4-devel libadwaita-devel gtksourceview5-devel`,
+  Arch: `sudo pacman -S gtk4 libadwaita gtksourceview5`)
 
 ## Build and run
 

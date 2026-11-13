@@ -1,4 +1,5 @@
 mod diff;
+mod editor;
 mod form;
 mod markdown;
 mod open;
@@ -33,6 +34,7 @@ fn main() -> glib::ExitCode {
 }
 
 fn startup(app: &adw::Application) {
+    sourceview::init();
     let display = gdk::Display::default().expect("display");
     gtk::IconTheme::for_display(&display).add_resource_path("/io/github/Kelvinlby/GittyHub/icons");
     let css = gtk::CssProvider::new();

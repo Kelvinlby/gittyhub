@@ -6,6 +6,7 @@ A Git client with deep GitHub integration, aiming to grow into sub-IDE-grade sof
 
 - **Linux only.** No Windows/macOS support; don't add platform shims for them.
 - **GTK 4 + libadwaita** via the `gtk4` and `libadwaita` crates (renamed `gtk` / `adw` in the workspace).
+  Code views use GtkSourceView 5 (`sourceview5`, renamed `sourceview`; floor `v5_10`).
   Feature floors: `gtk` `v4_18`, `adw` `v1_8`. Raise them only when a newer API is genuinely needed.
 - Wayland is the first-class target; X11 is supported but second-class. Test on Wayland first, and
   never rely on X11-only behaviour (global window positioning, grabbing, etc.).
