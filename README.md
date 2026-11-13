@@ -1,6 +1,6 @@
 # GittyHub
 
-A cross-platform desktop Git client with deep GitHub integration, built in Rust with [GPUI](https://gpui.rs) and [gpui-component](https://github.com/longbridge/gpui-kit).
+A Git client for Linux with deep GitHub integration, built in Rust with [GTK 4](https://gtk.org) and [libadwaita](https://gnome.pages.gitlab.gnome.org/libadwaita/).
 
 GittyHub uses the tools you already have as its backend:
 
@@ -13,7 +13,10 @@ GittyHub uses the tools you already have as its backend:
 
 - Rust stable (pinned via `rust-toolchain.toml`)
 - `git` and `gh` on your `PATH` (run `gh auth login` once)
-- Linux: Wayland/X11, xkbcommon and fontconfig development libraries, plus a Vulkan-capable driver
+- Linux with GTK ≥ 4.18 and libadwaita ≥ 1.8 development packages
+  (Debian/Ubuntu: `sudo apt install libgtk-4-dev libadwaita-1-dev`,
+  Fedora: `sudo dnf install gtk4-devel libadwaita-devel`,
+  Arch: `sudo pacman -S gtk4 libadwaita`)
 
 ## Build and run
 
@@ -26,7 +29,7 @@ cargo build --release
 
 ```
 crates/
-├─ app/          GPUI user interface (binary `gittyhub`)
+├─ app/          GTK 4 + libadwaita user interface (binary `gittyhub`)
 ├─ git-backend/  wrapper around the git CLI
 └─ gh-backend/   wrapper around the gh CLI (JSON output → typed structs)
 ```
@@ -40,8 +43,6 @@ cargo fmt
 cargo clippy --workspace -- -D warnings
 cargo test --workspace
 ```
-
-GPUI is pre-1.0, so `gpui`, `gpui-platform` and `gpui-component` are pinned to exact versions in the workspace `Cargo.toml`. Upgrade them together and deliberately.
 
 ## License
 
