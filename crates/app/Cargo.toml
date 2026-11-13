@@ -15,3 +15,16 @@ serde_json.workspace = true
 pulldown-cmark = { version = "0.13", default-features = false }
 git-backend.workspace = true
 gh-backend.workspace = true
+
+[package.metadata.deb]
+name = "gittyhub"
+maintainer = "Kelvin <kelvinlby@users.noreply.github.com>"
+section = "devel"
+extended-description = "A Git client for Linux with deep GitHub integration, built with GTK 4 and libadwaita. It drives the system git and gh CLIs, so it never handles credentials."
+depends = "$auto, git"
+recommends = "gh, openssh-client"
+assets = [
+    ["target/release/gittyhub", "usr/bin/", "755"],
+    ["../../data/io.github.Kelvinlby.GittyHub.desktop", "usr/share/applications/", "644"],
+    ["../../data/io.github.Kelvinlby.GittyHub.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+]

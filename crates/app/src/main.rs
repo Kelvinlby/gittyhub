@@ -82,7 +82,7 @@ fn startup(app: &adw::Application) {
                 .application_name("GittyHub")
                 .application_icon(APP_ID)
                 .developer_name("GittyHub contributors")
-                .version(env!("CARGO_PKG_VERSION"))
+                .version(option_env!("GITTYHUB_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")))
                 .website("https://github.com/Kelvinlby/gittyhub")
                 .issue_url("https://github.com/Kelvinlby/gittyhub/issues")
                 .license_type(gtk::License::Gpl30)

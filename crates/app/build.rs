@@ -3,6 +3,7 @@ use std::process::Command;
 fn main() {
     let out = std::env::var("OUT_DIR").unwrap();
     println!("cargo:rerun-if-changed=data");
+    println!("cargo:rerun-if-env-changed=GITTYHUB_VERSION");
     let status = Command::new("glib-compile-resources")
         .args([
             "--sourcedir=data",

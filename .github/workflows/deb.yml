@@ -1,0 +1,57 @@
+name: Debian package
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  deb:
+    runs-on: ubuntu-latest
+    # GTK >= 4.18 and libadwaita >= 1.8 need Ubuntu 26.04.
+    container: ubuntu:26.04
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl git build-essential pkg-config dpkg-dev \
+            libglib2.0-dev-bin libgtk-4-dev libadwaita-1-dev libgtksourceview-5-dev
+
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        run: |
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: deb-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: deb-
+
+      - name: Version from commit
+        id: ver
+        run: |
+          base=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          short=$(echo "$GITHUB_SHA" | cut -c1-7)
+          echo "version=${base}+git${short}" >> "$GITHUB_OUTPUT"
+
+      - name: Build package
+        env:
+          GITTYHUB_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          cargo install cargo-deb --locked
+          cargo deb -p gittyhub --locked --deb-version "$GITTYHUB_VERSION"
+          dpkg-deb --info target/debian/*.deb
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gittyhub_${{ steps.ver.outputs.version }}_amd64
+          path: target/debian/*.deb
+          retention-days: 7
+          if-no-files-found: error
