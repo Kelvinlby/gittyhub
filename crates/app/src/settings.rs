@@ -248,7 +248,13 @@ pub fn apply_zoom() {
         })
     });
     let zoom = get().ui_zoom.clamp(ZOOM_MIN, ZOOM_MAX);
-    gs.set_gtk_xft_dpi((base as f64 * zoom).round() as i32);
+    if (zoom - 1.0).abs() < 0.001 {
+        // Setting the desktop's own value back is ignored by GTK; resetting hands the
+        // property back to the desktop (and keeps following system text scaling).
+        gs.reset_property("gtk-xft-dpi");
+    } else {
+        gs.set_gtk_xft_dpi((base as f64 * zoom).round() as i32);
+    }
     // Line spacing is in pixels, so it must follow the zoom.
     apply_code_style();
 }
