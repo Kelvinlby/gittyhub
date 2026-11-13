@@ -126,12 +126,6 @@ popover.menu separator {
 }
 
 
-/* Commit hashes shown as links (parents in the details panel). */
-button.hash-link {
-  font-weight: normal;
-  padding: 2px 6px;
-  min-height: 0;
-}
 
 
 /* Floating sync button: an accent pill (button + menu), lifted off the content like a FAB.

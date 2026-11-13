@@ -849,10 +849,6 @@ impl Code {
                 .build(),
         );
         // Author
-        let who = util::hbox(10);
-        let avatar = adw::Avatar::new(36, Some(&m.author), true);
-        avatar.set_valign(gtk::Align::Start);
-        who.append(&avatar);
         let lines = util::vbox(2);
         lines.append(
             &gtk::Label::builder()
@@ -892,8 +888,7 @@ impl Code {
                     .build(),
             );
         }
-        who.append(&lines);
-        d.append(&who);
+        d.append(&lines);
 
         if !m.refs.is_empty() {
             let refs = adw::WrapBox::builder()
@@ -914,18 +909,22 @@ impl Code {
         }
 
         // Facts: hash, parents, change totals.
+        // Equal-height rows: the Commit row's copy button would otherwise make it taller.
         let grid = gtk::Grid::builder()
             .column_spacing(12)
-            .row_spacing(6)
+            .row_spacing(2)
+            .row_homogeneous(true)
             .build();
         let key = |t: &str| {
             gtk::Label::builder()
                 .label(t)
                 .xalign(0.0)
+                .valign(gtk::Align::Center)
                 .css_classes(["caption-heading", "dim-label"])
                 .build()
         };
         let hash = util::hbox(4);
+        hash.set_valign(gtk::Align::Center);
         hash.append(
             &gtk::Label::builder()
                 .label(&m.oid[..m.oid.len().min(12)])
@@ -947,20 +946,28 @@ impl Code {
         grid.attach(&hash, 1, 0, 1, 1);
         let mut row = 1;
         if !m.parents.is_empty() {
-            let parents = util::hbox(6);
+            let parents = util::hbox(12);
+            parents.set_valign(gtk::Align::Center);
             for p in &m.parents {
-                let b = gtk::Button::builder()
-                    .label(&p[..p.len().min(7)])
+                // A link-styled label (not a button) so it lines up with the hash above.
+                let link = gtk::Label::builder()
+                    .use_markup(true)
+                    .label(format!(
+                        "<a href=\"{p}\">{}</a>",
+                        glib::markup_escape_text(&p[..p.len().min(12)])
+                    ))
                     .tooltip_text("Show This Commit")
-                    .css_classes(["flat", "mono", "hash-link"])
+                    .xalign(0.0)
+                    .css_classes(["mono"])
                     .build();
-                let (w, oid) = (Rc::downgrade(self), p.clone());
-                b.connect_clicked(move |_| {
+                let w = Rc::downgrade(self);
+                link.connect_activate_link(move |_, uri| {
                     if let Some(v) = w.upgrade() {
-                        v.select_commit(&oid);
+                        v.select_commit(uri);
                     }
+                    glib::Propagation::Stop
                 });
-                parents.append(&b);
+                parents.append(&link);
             }
             grid.attach(
                 &key(if m.parents.len() > 1 {
@@ -988,6 +995,7 @@ impl Code {
                 m.deletions
             ))
             .xalign(0.0)
+            .valign(gtk::Align::Center)
             .build();
         grid.attach(&key("Changes"), 0, row, 1, 1);
         grid.attach(&stats, 1, row, 1, 1);
