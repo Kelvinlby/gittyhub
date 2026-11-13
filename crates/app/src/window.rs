@@ -629,14 +629,32 @@ fn repo_picker() -> (gtk::MenuButton, gtk::ListBox, gtk::SearchEntry) {
 
 fn welcome_page() -> (gtk::Widget, gtk::ListBox, gtk::Box, adw::ActionRow) {
     let content = util::vbox(24);
-    let status = adw::StatusPage::builder()
+    // A plain header rather than AdwStatusPage: a status page scrolls internally, so inside
+    // this scrolling page it got squeezed and clipped the text under the icon.
+    let status = util::vbox(12);
+    status.set_margin_top(24);
+    let icon = gtk::Image::builder()
         .icon_name("gh-github-symbolic")
-        .title("Welcome to GittyHub")
-        .description(
-            "Open a repository on this computer, or on any machine you can reach over SSH.",
-        )
+        .pixel_size(96)
+        .css_classes(["dim-label"])
+        .margin_bottom(12)
         .build();
-    status.add_css_class("compact");
+    status.append(&icon);
+    status.append(
+        &gtk::Label::builder()
+            .label("Welcome to GittyHub")
+            .wrap(true)
+            .justify(gtk::Justification::Center)
+            .css_classes(["title-1"])
+            .build(),
+    );
+    status.append(
+        &gtk::Label::builder()
+            .label("Open a repository on this computer, or on any machine you can reach over SSH.")
+            .wrap(true)
+            .justify(gtk::Justification::Center)
+            .build(),
+    );
     let buttons = adw::WrapBox::builder()
         .child_spacing(12)
         .line_spacing(12)
