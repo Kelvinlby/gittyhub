@@ -39,7 +39,8 @@ Also:
   workflows), releases (assets), deployments, packages, and repository settings (star, fork,
   visibility, archive, publish a local repository). Lists and details sit side by side.
 - **Appearance** — follows GNOME's light/dark preference or forces either, with a choice of
-  accent colours; adapts to narrow windows.
+  accent colours; code font, size and line spacing for diffs and the editor; adapts to narrow
+  windows.
 
 ## Requirements
 

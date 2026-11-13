@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use git_backend::Location;
 use gtk::glib;
+use gtk::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +25,12 @@ pub struct Settings {
     pub recent: Vec<Location>,
     pub open_tabs: Vec<Location>,
     pub clone_dir: String,
+    /// Font family for code; empty means the system monospace font.
+    pub code_font_family: String,
+    /// Code font size in points.
+    pub code_font_size: f64,
+    /// Line height as a multiple of the font size (1.0 = tight).
+    pub code_line_spacing: f64,
     pub window_width: i32,
     pub window_height: i32,
     pub maximized: bool,
@@ -42,6 +49,9 @@ impl Default for Settings {
             recent: Vec::new(),
             open_tabs: Vec::new(),
             clone_dir: glib::home_dir().join("Code").to_string_lossy().into_owned(),
+            code_font_family: String::new(),
+            code_font_size: 11.0,
+            code_line_spacing: 1.2,
             window_width: 1280,
             window_height: 820,
             maximized: false,
@@ -115,6 +125,7 @@ pub fn apply_appearance() {
         _ => adw::ColorScheme::Default,
     });
     apply_accent();
+    apply_code_style();
     // Standalone accent shades depend on light/dark; re-apply when it flips.
     thread_local!(static HOOKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
     if !HOOKED.with(|h| h.replace(true)) {
@@ -147,6 +158,67 @@ fn apply_accent() {
                 p,
                 gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
             );
+        }
+    });
+}
+
+thread_local! {
+    static CODE_CSS: gtk::CssProvider = gtk::CssProvider::new();
+    static CODE_VIEWS: RefCell<Vec<glib::WeakRef<gtk::TextView>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Mark `view` as showing code: it follows the code font, size and line spacing settings.
+pub fn register_code_view(view: &impl glib::object::IsA<gtk::TextView>) {
+    let view = view.as_ref();
+    view.add_css_class("code-view");
+    apply_spacing(view, &get());
+    CODE_VIEWS.with(|v| {
+        let mut v = v.borrow_mut();
+        v.retain(|w| w.upgrade().is_some());
+        v.push(view.downgrade());
+    });
+}
+
+fn apply_spacing(view: &gtk::TextView, s: &Settings) {
+    // Extra space split above and below each line; points → pixels at 96 dpi.
+    let px = s.code_font_size * 96.0 / 72.0;
+    let extra = ((s.code_line_spacing - 1.0).max(0.0) * px / 2.0).round() as i32;
+    view.set_pixels_above_lines(extra);
+    view.set_pixels_below_lines(extra);
+    view.set_pixels_inside_wrap(extra * 2);
+}
+
+/// Apply code font, size and line spacing to every code view.
+pub fn apply_code_style() {
+    let s = get();
+    let family = if s.code_font_family.trim().is_empty() {
+        "monospace".to_owned()
+    } else {
+        format!("\"{}\"", s.code_font_family.replace('"', ""))
+    };
+    let css = format!(
+        ".code-view, .code-view text {{ font-family: {family}; font-size: {}pt; }}",
+        s.code_font_size
+    );
+    thread_local!(static ADDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+    CODE_CSS.with(|p| {
+        p.load_from_string(&css);
+        if !ADDED.with(|a| a.replace(true))
+            && let Some(d) = gtk::gdk::Display::default()
+        {
+            // Above the app stylesheet so it beats GtkTextView's `monospace` class.
+            gtk::style_context_add_provider_for_display(
+                &d,
+                p,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
+            );
+        }
+    });
+    CODE_VIEWS.with(|v| {
+        for w in v.borrow().iter() {
+            if let Some(view) = w.upgrade() {
+                apply_spacing(&view, &s);
+            }
         }
     });
 }

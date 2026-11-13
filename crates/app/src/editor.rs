@@ -28,7 +28,7 @@ pub fn view(editable: bool) -> sourceview::View {
             b.set_style_scheme(scheme(sm.is_dark()).as_ref());
         }
     });
-    sourceview::View::builder()
+    let view = sourceview::View::builder()
         .buffer(&buffer)
         .editable(editable)
         .cursor_visible(editable)
@@ -44,7 +44,9 @@ pub fn view(editable: bool) -> sourceview::View {
         .bottom_margin(8)
         .left_margin(4)
         .right_margin(8)
-        .build()
+        .build();
+    crate::settings::register_code_view(&view);
+    view
 }
 
 pub fn source_buffer(view: &sourceview::View) -> sourceview::Buffer {

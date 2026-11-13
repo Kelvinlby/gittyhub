@@ -179,7 +179,7 @@ impl DiffView {
         if before.backward_char() && before.char() == '\n' {
             buffer.delete(&mut before, &mut end);
         }
-        gtk::TextView::builder()
+        let view = gtk::TextView::builder()
             .buffer(&buffer)
             .editable(false)
             .cursor_visible(false)
@@ -189,7 +189,9 @@ impl DiffView {
             .left_margin(8)
             .right_margin(8)
             .css_classes(["diff-view"])
-            .build()
+            .build();
+        crate::settings::register_code_view(&view);
+        view
     }
 }
 

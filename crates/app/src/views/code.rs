@@ -95,7 +95,7 @@ fn recolor(t: &gtk::TextTagTable, fg: gdk::RGBA) {
 }
 
 fn code_view(editable: bool, tags: Option<&gtk::TextTagTable>) -> gtk::TextView {
-    gtk::TextView::builder()
+    let view = gtk::TextView::builder()
         .buffer(&gtk::TextBuffer::new(tags))
         .editable(editable)
         .cursor_visible(editable)
@@ -104,7 +104,9 @@ fn code_view(editable: bool, tags: Option<&gtk::TextTagTable>) -> gtk::TextView 
         .bottom_margin(8)
         .left_margin(8)
         .right_margin(8)
-        .build()
+        .build();
+    settings::register_code_view(&view);
+    view
 }
 
 fn scrolled(w: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {

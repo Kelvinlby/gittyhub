@@ -93,6 +93,7 @@ pub fn show(parent: Option<&gtk::Window>) {
     );
     accent_group.add(&swatches);
     appearance.add(&accent_group);
+    appearance.add(&code_group(&s));
     dialog.add(&appearance);
 
     // Behaviour
@@ -248,4 +249,112 @@ pub fn show(parent: Option<&gtk::Window>) {
     });
 
     dialog.present(parent);
+}
+
+/// Font, size and line spacing for diffs, the editor and file views, with a live preview.
+fn code_group(s: &settings::Settings) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder()
+        .title("Code")
+        .description("Diffs, the editor and file views")
+        .build();
+
+    let font_dialog = gtk::FontDialog::builder().title("Code Font").build();
+    let font_button = gtk::FontDialogButton::builder()
+        .dialog(&font_dialog)
+        .level(gtk::FontLevel::Family)
+        .valign(gtk::Align::Center)
+        .build();
+    if !s.code_font_family.is_empty() {
+        let mut desc = gtk::pango::FontDescription::new();
+        desc.set_family(&s.code_font_family);
+        font_button.set_font_desc(&desc);
+    }
+    let reset = util::icon_button("edit-undo-symbolic", "Use the System Monospace Font");
+    reset.set_visible(!s.code_font_family.is_empty());
+    let font_row = adw::ActionRow::builder()
+        .title("Font")
+        .subtitle(if s.code_font_family.is_empty() {
+            "System monospace font".to_owned()
+        } else {
+            glib::markup_escape_text(&s.code_font_family).to_string()
+        })
+        .build();
+    font_row.add_suffix(&reset);
+    font_row.add_suffix(&font_button);
+    font_row.set_activatable_widget(Some(&font_button));
+    {
+        let (row, reset) = (font_row.clone(), reset.clone());
+        font_button.connect_font_desc_notify(move |b| {
+            let family = b
+                .font_desc()
+                .and_then(|d| d.family().map(|f| f.to_string()))
+                .unwrap_or_default();
+            row.set_subtitle(&glib::markup_escape_text(&family));
+            reset.set_visible(!family.is_empty());
+            settings::update(|s| s.code_font_family = family);
+            settings::apply_code_style();
+        });
+    }
+    {
+        let row = font_row.clone();
+        reset.connect_clicked(move |b| {
+            b.set_visible(false);
+            row.set_subtitle("System monospace font");
+            settings::update(|s| s.code_font_family.clear());
+            settings::apply_code_style();
+        });
+    }
+    group.add(&font_row);
+
+    let size = adw::SpinRow::builder()
+        .title("Font Size")
+        .subtitle("In points")
+        .digits(1)
+        .adjustment(&gtk::Adjustment::new(
+            s.code_font_size,
+            6.0,
+            48.0,
+            0.5,
+            1.0,
+            0.0,
+        ))
+        .build();
+    size.connect_value_notify(|r| {
+        let v = r.value();
+        settings::update(|s| s.code_font_size = v);
+        settings::apply_code_style();
+    });
+    group.add(&size);
+
+    let spacing = adw::SpinRow::builder()
+        .title("Line Spacing")
+        .subtitle("Line height as a multiple of the font size")
+        .digits(1)
+        .adjustment(&gtk::Adjustment::new(
+            s.code_line_spacing,
+            1.0,
+            3.0,
+            0.1,
+            0.5,
+            0.0,
+        ))
+        .build();
+    spacing.connect_value_notify(|r| {
+        let v = r.value();
+        settings::update(|s| s.code_line_spacing = v);
+        settings::apply_code_style();
+    });
+    group.add(&spacing);
+
+    // Live preview using the real code view.
+    let preview = crate::editor::view(false);
+    crate::editor::set_text(
+        &preview,
+        "preview.rs",
+        "/// Preview of the code font.\nfn greet(name: &str) -> String {\n    format!(\"Hello, {name}!\") // 0O 1lI\n}\n",
+    );
+    let frame = gtk::Frame::builder().child(&preview).margin_top(12).build();
+    frame.add_css_class("view");
+    group.add(&frame);
+    group
 }
