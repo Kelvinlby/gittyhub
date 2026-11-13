@@ -930,7 +930,7 @@ impl Code {
                 .label(&m.oid[..m.oid.len().min(12)])
                 .tooltip_text(&m.oid)
                 .selectable(true)
-                .css_classes(["mono"])
+                .css_classes(["mono", "hash-value"])
                 .build(),
         );
         let copy = util::icon_button("edit-copy-symbolic", "Copy Full Hash");
@@ -946,28 +946,21 @@ impl Code {
         grid.attach(&hash, 1, 0, 1, 1);
         let mut row = 1;
         if !m.parents.is_empty() {
-            let parents = util::hbox(12);
+            let parents = util::hbox(4);
             parents.set_valign(gtk::Align::Center);
             for p in &m.parents {
-                // A link-styled label (not a button) so it lines up with the hash above.
-                let link = gtk::Label::builder()
-                    .use_markup(true)
-                    .label(format!(
-                        "<a href=\"{p}\">{}</a>",
-                        glib::markup_escape_text(&p[..p.len().min(12)])
-                    ))
+                let b = gtk::Button::builder()
+                    .label(&p[..p.len().min(12)])
                     .tooltip_text("Show This Commit")
-                    .xalign(0.0)
-                    .css_classes(["mono"])
+                    .css_classes(["flat", "mono", "hash-button"])
                     .build();
-                let w = Rc::downgrade(self);
-                link.connect_activate_link(move |_, uri| {
+                let (w, oid) = (Rc::downgrade(self), p.clone());
+                b.connect_clicked(move |_| {
                     if let Some(v) = w.upgrade() {
-                        v.select_commit(uri);
+                        v.select_commit(&oid);
                     }
-                    glib::Propagation::Stop
                 });
-                parents.append(&link);
+                parents.append(&b);
             }
             grid.attach(
                 &key(if m.parents.len() > 1 {
@@ -985,6 +978,7 @@ impl Code {
         }
         let stats = gtk::Label::builder()
             .use_markup(true)
+            .css_classes(["hash-value"])
             .label(format!(
                 "{} file{} · <span foreground=\"{}\">+{}</span> <span foreground=\"{}\">−{}</span>",
                 m.files_changed,
