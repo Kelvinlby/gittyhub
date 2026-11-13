@@ -29,6 +29,8 @@ Deploy and Settings — and starts on Code:
 
 Also:
 
+- **Tabs** — the new-tab button (Ctrl+T) lists recently opened repositories, local or SSH, so
+  reopening one is a click; open tabs are restored on startup.
 - **Local and remote repositories** — open, clone or create repositories on this machine or on
   any host you can reach over SSH. Remote repositories run `git` on the host through your system
   `ssh` client, so hosts, keys and `ssh-agent` come from your own `~/.ssh` setup.

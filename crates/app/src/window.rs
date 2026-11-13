@@ -29,6 +29,10 @@ pub struct Window {
     recent_list: gtk::ListBox,
     recent_group: gtk::Box,
     account_row: adw::ActionRow,
+    /// New-tab button: a popover with recent repositories and ways to add one.
+    open_button: gtk::MenuButton,
+    picker_list: gtk::ListBox,
+    picker_search: gtk::SearchEntry,
 }
 
 impl Window {
@@ -51,19 +55,7 @@ impl Window {
             .build();
 
         // Header bar
-        let open_menu = gio::Menu::new();
-        open_menu.append(Some("Open Local Repository…"), Some("win.open-local"));
-        open_menu.append(
-            Some("Open Remote Repository (SSH)…"),
-            Some("win.open-remote"),
-        );
-        open_menu.append(Some("Clone Repository…"), Some("win.clone"));
-        open_menu.append(Some("New Repository…"), Some("win.new-repo"));
-        let open_button = gtk::MenuButton::builder()
-            .icon_name("tab-new-symbolic")
-            .menu_model(&open_menu)
-            .tooltip_text("Open Repository")
-            .build();
+        let (open_button, picker_list, picker_search) = repo_picker();
         let main_menu = gio::Menu::new();
         let section = gio::Menu::new();
         section.append(Some("Preferences"), Some("app.preferences"));
@@ -121,6 +113,9 @@ impl Window {
             recent_list,
             recent_group,
             account_row,
+            open_button,
+            picker_list,
+            picker_search,
         });
         WINDOWS.with(|w| w.borrow_mut().push(this.clone()));
         this.setup_actions();
@@ -155,7 +150,7 @@ impl Window {
             self.win.add_action(&a);
         };
         add("open-local", Box::new(|w| w.run_open(open::Kind::Local)));
-        add("new-tab", Box::new(|w| w.run_open(open::Kind::Local)));
+        add("new-tab", Box::new(|w| w.open_button.popup()));
         add("open-remote", Box::new(|w| w.run_open(open::Kind::Remote)));
         add("clone", Box::new(|w| w.run_open(open::Kind::Clone)));
         add("new-repo", Box::new(|w| w.run_open(open::Kind::New)));
@@ -228,6 +223,51 @@ impl Window {
                     && let Some(p) = w.current()
                 {
                     p.refresh();
+                }
+            }
+        ));
+        if let Some(popover) = self.open_button.popover() {
+            popover.connect_show(glib::clone!(
+                #[strong]
+                weak,
+                move |_| {
+                    if let Some(w) = weak.upgrade() {
+                        w.picker_search.set_text("");
+                        w.fill_picker();
+                        w.picker_search.grab_focus();
+                    }
+                }
+            ));
+        }
+        self.picker_list.connect_row_activated(glib::clone!(
+            #[strong]
+            weak,
+            move |_, row| {
+                if let Some(w) = weak.upgrade() {
+                    w.open_button.popdown();
+                    let idx = row.index() as usize;
+                    if let Some(loc) = settings::get().recent.get(idx).cloned() {
+                        w.open_location(loc);
+                    }
+                }
+            }
+        ));
+        self.picker_search.connect_activate(glib::clone!(
+            #[strong]
+            weak,
+            move |_| {
+                // Enter opens the first matching repository.
+                if let Some(w) = weak.upgrade() {
+                    let mut c = w.picker_list.first_child();
+                    while let Some(x) = c {
+                        if x.is_visible()
+                            && let Ok(row) = x.clone().downcast::<gtk::ListBoxRow>()
+                        {
+                            row.activate();
+                            return;
+                        }
+                        c = x.next_sibling();
+                    }
                 }
             }
         ));
@@ -397,6 +437,65 @@ impl Window {
         self.update_chrome();
     }
 
+    /// Fill the new-tab popover with recent repositories (open ones are marked).
+    fn fill_picker(self: &Rc<Self>) {
+        util::clear_rows(&self.picker_list);
+        let open: Vec<Location> = self
+            .pages
+            .borrow()
+            .iter()
+            .map(|(_, p)| p.ctx.loc.clone())
+            .collect();
+        for (i, loc) in settings::get().recent.iter().enumerate() {
+            let row_box = util::hbox(10);
+            row_box.set_margin_top(4);
+            row_box.set_margin_bottom(4);
+            row_box.append(&gtk::Image::from_icon_name(if loc.is_remote() {
+                "gh-server-symbolic"
+            } else {
+                "folder-symbolic"
+            }));
+            let texts = util::vbox(2);
+            texts.set_hexpand(true);
+            texts.append(
+                &gtk::Label::builder()
+                    .label(loc.name())
+                    .xalign(0.0)
+                    .ellipsize(gtk::pango::EllipsizeMode::End)
+                    .build(),
+            );
+            texts.append(
+                &gtk::Label::builder()
+                    .label(loc.to_string())
+                    .xalign(0.0)
+                    .ellipsize(gtk::pango::EllipsizeMode::Start)
+                    .css_classes(["caption", "dim-label"])
+                    .build(),
+            );
+            row_box.append(&texts);
+            if open.contains(loc) {
+                row_box.append(&util::pill("Open", "accent"));
+            }
+            let remove = util::icon_button("window-close-symbolic", "Remove from Recent");
+            let weak = Rc::downgrade(self);
+            remove.connect_clicked(move |_| {
+                settings::update(|s| {
+                    if i < s.recent.len() {
+                        s.recent.remove(i);
+                    }
+                });
+                if let Some(w) = weak.upgrade() {
+                    w.fill_picker();
+                    w.refresh_welcome();
+                }
+            });
+            row_box.append(&remove);
+            let row = gtk::ListBoxRow::builder().child(&row_box).build();
+            row.set_widget_name(&format!("{} {}", loc.name(), loc));
+            self.picker_list.append(&row);
+        }
+    }
+
     fn refresh_welcome(self: &Rc<Self>) {
         let recent = settings::get().recent;
         self.recent_list.remove_all();
@@ -442,6 +541,68 @@ impl Window {
             }
         });
     }
+}
+
+/// The new-tab button and its popover: search, recent repositories, and ways to add one.
+fn repo_picker() -> (gtk::MenuButton, gtk::ListBox, gtk::SearchEntry) {
+    let search = gtk::SearchEntry::builder()
+        .placeholder_text("Search recent repositories")
+        .build();
+    let list = gtk::ListBox::builder()
+        .css_classes(["navigation-sidebar"])
+        .build();
+    util::placeholder(&list, "No recent repositories yet");
+    util::filter_by_name(&search, std::slice::from_ref(&list));
+    let content = util::vbox(6);
+    content.set_width_request(420);
+    content.append(&search);
+    content.append(&util::heading("Recent", "heading"));
+    content.append(
+        &gtk::ScrolledWindow::builder()
+            .child(&list)
+            .min_content_height(60)
+            .max_content_height(420)
+            .propagate_natural_height(true)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .build(),
+    );
+    content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    let popover = gtk::Popover::builder().child(&content).build();
+    for (label, icon, action) in [
+        (
+            "Open Local Repository…",
+            "folder-open-symbolic",
+            "win.open-local",
+        ),
+        ("Open over SSH…", "gh-server-symbolic", "win.open-remote"),
+        ("Clone Repository…", "folder-download-symbolic", "win.clone"),
+        ("New Repository…", "folder-new-symbolic", "win.new-repo"),
+    ] {
+        let b = gtk::Button::builder()
+            .child(
+                &adw::ButtonContent::builder()
+                    .icon_name(icon)
+                    .label(label)
+                    .halign(gtk::Align::Start)
+                    .build(),
+            )
+            .action_name(action)
+            .css_classes(["flat"])
+            .build();
+        let p = popover.downgrade();
+        b.connect_clicked(move |_| {
+            if let Some(p) = p.upgrade() {
+                p.popdown();
+            }
+        });
+        content.append(&b);
+    }
+    let button = gtk::MenuButton::builder()
+        .icon_name("tab-new-symbolic")
+        .popover(&popover)
+        .tooltip_text("Open Repository (Ctrl+T)")
+        .build();
+    (button, list, search)
 }
 
 fn welcome_page() -> (gtk::Widget, gtk::ListBox, gtk::Box, adw::ActionRow) {
@@ -511,6 +672,7 @@ fn shortcuts_dialog(win: &adw::ApplicationWindow) {
         (
             "Repositories",
             &[
+                ("Ctrl+T", "New tab: recent repositories"),
                 ("Ctrl+O", "Open local repository"),
                 ("Ctrl+Shift+O", "Open repository over SSH"),
                 ("Ctrl+Shift+N", "Clone repository"),
