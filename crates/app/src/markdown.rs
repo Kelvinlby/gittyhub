@@ -143,6 +143,7 @@ pub fn render(md: &str) -> gtk::Widget {
                         .row_spacing(0)
                         .css_classes(["card", "md-table"])
                         .halign(gtk::Align::Start)
+                        .valign(gtk::Align::Start)
                         .build();
                     let scroller = gtk::ScrolledWindow::builder()
                         .child(&grid)
