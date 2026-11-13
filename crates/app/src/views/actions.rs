@@ -421,6 +421,8 @@ fn fill_run(ctx: &Rc<Ctx>, content: &gtk::Box, d: &RunDetail, reload: Callback) 
         let exp = adw::ExpanderRow::builder()
             .title(glib::markup_escape_text(&job.name))
             .subtitle(outcome)
+            // A single job is what you came to see: show its steps straight away.
+            .expanded(d.jobs.len() == 1)
             .build();
         exp.add_prefix(&util::outcome_icon(outcome));
         let log = util::icon_button("text-x-generic-symbolic", "View Job Log");
