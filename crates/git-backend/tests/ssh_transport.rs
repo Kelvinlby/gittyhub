@@ -38,7 +38,13 @@ fn git_over_fake_ssh() {
     git_backend::stage(&loc, &["a file.txt"]).unwrap();
     git_backend::config_set(&loc, "user.name", "Test O'Brien").unwrap();
     git_backend::config_set(&loc, "user.email", "t@example.com").unwrap();
-    git_backend::commit(&loc, "subject with $HOME and `ticks`\n\nbody", false, false).unwrap();
+    git_backend::commit(
+        &loc,
+        "subject with $HOME and `ticks`\n\nbody",
+        false,
+        &git_backend::SignOff::None,
+    )
+    .unwrap();
 
     let q = git_backend::LogQuery {
         limit: 5,

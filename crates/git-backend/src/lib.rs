@@ -508,7 +508,7 @@ pub fn commit_paths(
     exclude: &[&str],
     message: &str,
     amend: bool,
-    signoff: bool,
+    signoff: &SignOff,
 ) -> Result<()> {
     if !include.is_empty() {
         let mut args = vec!["add", "-A", "--"];
@@ -532,15 +532,48 @@ pub fn commit_paths(
 // ---------------------------------------------------------------------------
 // Commits
 
-pub fn commit(loc: &Location, message: &str, amend: bool, signoff: bool) -> Result<()> {
+/// Whether and how to add a `Signed-off-by` trailer to a commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignOff {
+    None,
+    /// `git commit --signoff`: the committer's `user.name <user.email>`.
+    Identity,
+    /// A custom value, e.g. `Jane Doe <jane@example.com>`.
+    As(String),
+}
+
+impl SignOff {
+    pub fn new(enabled: bool, custom: &str) -> SignOff {
+        match (enabled, custom.trim()) {
+            (false, _) => SignOff::None,
+            (true, "") => SignOff::Identity,
+            (true, c) => SignOff::As(c.to_owned()),
+        }
+    }
+}
+
+pub fn commit(loc: &Location, message: &str, amend: bool, signoff: &SignOff) -> Result<()> {
     let mut args = vec!["commit", "-F", "-"];
     if amend {
         args.push("--amend");
     }
-    if signoff {
-        args.push("--signoff");
+    let trailer;
+    match signoff {
+        SignOff::None => {}
+        SignOff::Identity => args.push("--signoff"),
+        SignOff::As(who) => {
+            trailer = format!("Signed-off-by: {who}");
+            args.extend(["--trailer", &trailer]);
+        }
     }
     loc.git_in(&args, Some(message.as_bytes())).map(drop)
+}
+
+/// The `Signed-off-by` value git would use by default here (`user.name <user.email>`).
+pub fn signoff_identity(loc: &Location) -> Option<String> {
+    let name = config_get(loc, "user.name")?;
+    let email = config_get(loc, "user.email")?;
+    Some(format!("{name} <{email}>"))
 }
 
 /// Message of the HEAD commit (for amending).

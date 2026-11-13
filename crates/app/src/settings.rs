@@ -19,6 +19,8 @@ pub struct Settings {
     /// `merge`, `rebase` or `ff-only`.
     pub pull_mode: String,
     pub signoff: bool,
+    /// Custom `Signed-off-by` value (`Name <email>`); empty uses the git identity.
+    pub signoff_as: String,
     pub history_all_branches: bool,
     /// Minutes between background fetches; 0 disables.
     pub auto_fetch_minutes: u32,
@@ -50,6 +52,7 @@ impl Default for Settings {
             restore_tabs: true,
             pull_mode: "merge".into(),
             signoff: false,
+            signoff_as: String::new(),
             history_all_branches: false,
             auto_fetch_minutes: 10,
             recent: Vec::new(),

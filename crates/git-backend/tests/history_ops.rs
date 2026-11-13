@@ -16,7 +16,7 @@ fn repo(name: &str) -> (Location, std::path::PathBuf) {
 fn commit(loc: &Location, file: &str, text: &str, msg: &str) {
     loc.write_file(file, text.as_bytes()).unwrap();
     git_backend::stage_all(loc).unwrap();
-    git_backend::commit(loc, msg, false, false).unwrap();
+    git_backend::commit(loc, msg, false, &git_backend::SignOff::None).unwrap();
 }
 
 fn subjects(loc: &Location) -> Vec<String> {
@@ -94,7 +94,15 @@ fn commit_only_included_files() {
     loc.write_file("b", b"new\n").unwrap();
     // Pre-stage the file that will be excluded, as an external tool might.
     git_backend::stage(&loc, &["b"]).unwrap();
-    git_backend::commit_paths(&loc, &["a"], &["b"], "only a", false, false).unwrap();
+    git_backend::commit_paths(
+        &loc,
+        &["a"],
+        &["b"],
+        "only a",
+        false,
+        &git_backend::SignOff::None,
+    )
+    .unwrap();
     let files = git_backend::commit_files(&loc, "HEAD").unwrap();
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].path, "a");
@@ -123,5 +131,38 @@ fn rebase_state_ignores_stale_rebase_head() {
     loc.git(&["update-ref", "REBASE_HEAD", head.trim()])
         .unwrap();
     assert_eq!(git_backend::repo_state(&loc), RepoState::Clean);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn sign_off_default_and_custom() {
+    let (loc, dir) = repo("signoff");
+    let msg = |rev: &str| loc.git(&["log", "-1", "--format=%B", rev]).unwrap();
+    loc.write_file("a", b"1\n").unwrap();
+    git_backend::stage_all(&loc).unwrap();
+    git_backend::commit(&loc, "default", false, &git_backend::SignOff::Identity).unwrap();
+    assert!(
+        msg("HEAD").contains("Signed-off-by: T <t@example.com>"),
+        "{}",
+        msg("HEAD")
+    );
+
+    loc.write_file("a", b"2\n").unwrap();
+    git_backend::stage_all(&loc).unwrap();
+    let custom = git_backend::SignOff::new(true, "  Jane Doe <jane@example.com> ");
+    git_backend::commit(&loc, "custom", false, &custom).unwrap();
+    assert!(
+        msg("HEAD").contains("Signed-off-by: Jane Doe <jane@example.com>"),
+        "{}",
+        msg("HEAD")
+    );
+    assert_eq!(
+        git_backend::SignOff::new(false, "x"),
+        git_backend::SignOff::None
+    );
+    assert_eq!(
+        git_backend::signoff_identity(&loc).as_deref(),
+        Some("T <t@example.com>")
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }

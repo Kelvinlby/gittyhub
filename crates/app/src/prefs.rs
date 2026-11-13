@@ -196,6 +196,59 @@ pub fn show(parent: Option<&gtk::Window>) {
         settings::update(|s| s.signoff = v);
     });
     commits.add(&signoff);
+    // Custom sign-off; empty means git's own `user.name <user.email>`.
+    let signoff_as = adw::EntryRow::builder()
+        .title("Signed-off-by (empty: your git name and email)")
+        .text(&s.signoff_as)
+        .show_apply_button(true)
+        .build();
+    signoff
+        .bind_property("active", &signoff_as, "sensitive")
+        .sync_create()
+        .build();
+    commits.add(&signoff_as);
+    // Show exactly what will be added; the git identity is read off the main thread.
+    let identity: std::rc::Rc<std::cell::RefCell<Option<String>>> = Default::default();
+    let show = {
+        let (row, identity) = (signoff.clone(), identity.clone());
+        move || {
+            let custom = settings::get().signoff_as;
+            let who = if custom.trim().is_empty() {
+                identity
+                    .borrow()
+                    .clone()
+                    .unwrap_or_else(|| "your git user.name <user.email>".into())
+            } else {
+                custom.trim().to_owned()
+            };
+            row.set_subtitle(&glib::markup_escape_text(&format!(
+                "Adds “Signed-off-by: {who}” to new commits"
+            )));
+        }
+    };
+    show();
+    {
+        let show = show.clone();
+        signoff_as.connect_apply(move |r| {
+            let v = r.text().trim().to_owned();
+            settings::update(|s| s.signoff_as = v);
+            show();
+        });
+    }
+    {
+        let show = show.clone();
+        util::spawn(
+            || {
+                Ok(git_backend::signoff_identity(
+                    &git_backend::Location::Local(glib::home_dir()),
+                ))
+            },
+            move |r| {
+                *identity.borrow_mut() = r.ok().flatten();
+                show();
+            },
+        );
+    }
     let all = adw::SwitchRow::builder()
         .title("Show All Branches in History")
         .subtitle("Otherwise only the current branch's history is listed")

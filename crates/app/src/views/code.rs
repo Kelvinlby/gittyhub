@@ -1573,7 +1573,10 @@ impl Code {
             format!("{summary}\n\n{body}")
         };
         let amend = self.amend.is_active();
-        let signoff = settings::get().signoff;
+        let signoff = {
+            let s = settings::get();
+            git_backend::SignOff::new(s.signoff, &s.signoff_as)
+        };
         let w = Rc::downgrade(self);
         self.ctx.git(
             "Commit",
@@ -1582,7 +1585,7 @@ impl Code {
                 let exc: Vec<&str> = excluded.iter().map(String::as_str).collect();
                 match state {
                     RepoState::Clean | RepoState::Merging => {
-                        git_backend::commit_paths(l, &inc, &exc, &msg, amend, signoff)
+                        git_backend::commit_paths(l, &inc, &exc, &msg, amend, &signoff)
                     }
                     _ => {
                         git_backend::stage(l, &inc)?;
