@@ -241,7 +241,7 @@ pub struct RepoPage {
     pub header_end: gtk::Box,
     branch_content: adw::ButtonContent,
     branch_list: gtk::ListBox,
-    sync: adw::SplitButton,
+    sync: gtk::Button,
     sync_content: adw::ButtonContent,
     spinner: adw::Spinner,
     minutes_since_fetch: Cell<u32>,
@@ -291,18 +291,32 @@ impl RepoPage {
             .icon_name("view-refresh-symbolic")
             .label("Fetch")
             .build();
-        let sync = adw::SplitButton::builder()
+        // A linked button + menu button rather than AdwSplitButton, whose dropdown part is
+        // hard-wired to a chevron; this one shows a "more" icon.
+        let sync = gtk::Button::builder()
             .child(&sync_content)
+            .css_classes(["suggested-action"])
+            .name("sync-main")
+            .build();
+        let sync_more = gtk::MenuButton::builder()
+            .icon_name("view-more-symbolic")
             .menu_model(&sync_menu)
             .direction(gtk::ArrowType::Up)
-            .dropdown_tooltip("All Sync Actions")
-            .css_classes(["suggested-action", "sync-fab"])
+            .tooltip_text("All Sync Actions")
+            .css_classes(["suggested-action"])
+            .name("sync-more")
+            .build();
+        // The container clips both halves to one pill shape, whatever their own corners are.
+        let fab = gtk::Box::builder()
+            .css_classes(["linked", "sync-fab"])
+            .overflow(gtk::Overflow::Hidden)
             .halign(gtk::Align::End)
             .valign(gtk::Align::End)
             .margin_end(18)
             .margin_bottom(18)
             .build();
-        let fab = sync.clone();
+        fab.append(&sync);
+        fab.append(&sync_more);
         let overlay = gtk::Overlay::builder().child(&stack).build();
         overlay.add_overlay(&fab);
         let main = adw::ToolbarView::new();
@@ -654,25 +668,25 @@ impl RepoPage {
         let publish = b.upstream.is_none() && b.head != "(detached)";
         let (icon, label, tip) = if publish {
             (
-                "go-up-symbolic",
+                "gh-arrow-up-symbolic",
                 "Publish Branch".to_owned(),
                 "Push this branch and set its upstream",
             )
         } else if b.behind > 0 && b.ahead > 0 {
             (
-                "go-down-symbolic",
+                "gh-arrow-down-symbolic",
                 format!("Pull ↓{} ↑{}", b.behind, b.ahead),
                 "Pull, then push",
             )
         } else if b.behind > 0 {
             (
-                "go-down-symbolic",
+                "gh-arrow-down-symbolic",
                 format!("Pull ↓{}", b.behind),
                 "Pull new commits",
             )
         } else if b.ahead > 0 {
             (
-                "go-up-symbolic",
+                "gh-arrow-up-symbolic",
                 format!("Push ↑{}", b.ahead),
                 "Push local commits",
             )

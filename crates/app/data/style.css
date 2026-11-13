@@ -133,23 +133,28 @@ button.hash-link {
   min-height: 0;
 }
 
-/* Floating sync button: pill-shaped, lifted off the content like a FAB. */
-splitbutton.sync-fab > button,
-splitbutton.sync-fab > menubutton > button {
-  min-height: 40px;
+
+/* Floating sync button: an accent pill (button + menu), lifted off the content like a FAB.
+   The container clips to the pill; the halves are square inside it. */
+.sync-fab {
+  border-radius: 999px;
 }
-splitbutton.sync-fab > button {
-  border-radius: 999px 0 0 999px;
+#sync-main,
+#sync-more,
+#sync-more > button {
+  min-height: 40px;
+  border-radius: 0;
+}
+#sync-main {
   padding-left: 18px;
   padding-right: 14px;
 }
-splitbutton.sync-fab > menubutton > button {
-  border-radius: 0 999px 999px 0;
+#sync-more > button {
   padding-left: 10px;
   padding-right: 14px;
+  box-shadow: inset 1px 0 color-mix(in srgb, currentColor 25%, transparent);
 }
-splitbutton.sync-fab {
-  border-radius: 999px;
-  box-shadow: 0 2px 6px 0 color-mix(in srgb, var(--shade-color) 100%, transparent),
+.sync-fab {
+  box-shadow: 0 2px 6px 0 var(--shade-color),
               0 4px 16px 2px color-mix(in srgb, var(--shade-color) 60%, transparent);
 }

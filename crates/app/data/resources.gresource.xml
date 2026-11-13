@@ -15,5 +15,9 @@
     <file>icons/scalable/actions/gh-github-symbolic.svg</file>
     <file>icons/scalable/actions/gh-server-symbolic.svg</file>
     <file>icons/scalable/actions/gh-code-symbolic.svg</file>
+    <file>icons/scalable/actions/gh-arrow-up-symbolic.svg</file>
+    <file>icons/scalable/actions/gh-arrow-down-symbolic.svg</file>
+    <file>icons/scalable/actions/gh-arrow-left-symbolic.svg</file>
+    <file>icons/scalable/actions/gh-arrow-right-symbolic.svg</file>
   </gresource>
 </gresources>

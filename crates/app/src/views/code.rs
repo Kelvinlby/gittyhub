@@ -691,7 +691,7 @@ impl Code {
         b.set_margin_start(4);
         b.set_margin_end(4);
         let icon = gtk::Image::from_icon_name(if unpushed {
-            "go-up-symbolic"
+            "gh-arrow-up-symbolic"
         } else {
             "gh-commit-symbolic"
         });

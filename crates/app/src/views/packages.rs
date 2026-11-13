@@ -78,7 +78,7 @@ impl View for Packages {
                 );
                 row.set_activatable(true);
                 row.add_prefix(&gtk::Image::from_icon_name("gh-package-symbolic"));
-                row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+                row.add_suffix(&gtk::Image::from_icon_name("gh-arrow-right-symbolic"));
                 let w = Rc::downgrade(&this);
                 row.connect_activated(move |_| {
                     if let Some(v) = w.upgrade() {

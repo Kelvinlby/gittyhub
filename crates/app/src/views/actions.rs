@@ -228,7 +228,7 @@ impl View for Actions {
                     );
                     row.set_activatable(true);
                     row.add_prefix(&util::outcome_icon(run.outcome()));
-                    row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+                    row.add_suffix(&gtk::Image::from_icon_name("gh-arrow-right-symbolic"));
                     let w = Rc::downgrade(&this);
                     let id = run.database_id;
                     row.connect_activated(move |_| {
