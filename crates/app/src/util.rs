@@ -87,13 +87,6 @@ pub fn iso_relative(s: &str) -> String {
         .unwrap_or_else(|_| s.to_owned())
 }
 
-pub fn absolute_time(unix: i64) -> String {
-    glib::DateTime::from_unix_local(unix)
-        .and_then(|d| d.format("%Y-%m-%d %H:%M"))
-        .map(|s| s.to_string())
-        .unwrap_or_default()
-}
-
 pub fn human_size(bytes: u64) -> String {
     glib::format_size(bytes).to_string()
 }
@@ -178,8 +171,16 @@ pub fn spinner_page() -> gtk::Widget {
     s.upcast()
 }
 
-/// Selectable, wrapping body text.
-pub fn body_label(text: &str) -> gtk::Label {
+/// Markdown body text (PRs, issues, releases); a dim note when empty.
+pub fn body_label(text: &str) -> gtk::Widget {
+    if !text.trim().is_empty() {
+        return crate::markdown::render(text);
+    }
+    plain_label(text).upcast()
+}
+
+/// Selectable, wrapping plain text.
+pub fn plain_label(text: &str) -> gtk::Label {
     gtk::Label::builder()
         .label(if text.trim().is_empty() {
             "No description provided."
@@ -218,17 +219,13 @@ pub fn boxed_list() -> gtk::ListBox {
 
 /// Scrollable, width-clamped page body.
 pub fn page_scroller(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
-    let clamp = adw::Clamp::builder()
-        .maximum_size(960)
-        .tightening_threshold(700)
-        .child(child)
-        .margin_top(18)
-        .margin_bottom(18)
-        .margin_start(12)
-        .margin_end(12)
-        .build();
+    let child = child.as_ref();
+    child.set_margin_top(18);
+    child.set_margin_bottom(18);
+    child.set_margin_start(24);
+    child.set_margin_end(24);
     gtk::ScrolledWindow::builder()
-        .child(&clamp)
+        .child(child)
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vexpand(true)
         .build()
@@ -438,4 +435,55 @@ pub fn clear_rows(list: &gtk::ListBox) {
             list.remove(&row);
         }
     }
+}
+
+/// Pop up a context menu at (x, y) on `parent`. An empty label starts a new section.
+pub fn popup_menu(parent: &impl IsA<gtk::Widget>, x: f64, y: f64, items: Vec<(String, Callback)>) {
+    let group = gio::SimpleActionGroup::new();
+    let menu = gio::Menu::new();
+    let mut section = gio::Menu::new();
+    for (i, (label, f)) in items.into_iter().enumerate() {
+        if label.is_empty() {
+            if section.n_items() > 0 {
+                menu.append_section(None, &section);
+            }
+            section = gio::Menu::new();
+            continue;
+        }
+        let name = format!("a{i}");
+        let action = gio::SimpleAction::new(&name, None);
+        action.connect_activate(move |_, _| f());
+        group.add_action(&action);
+        section.append(Some(&label), Some(&format!("ctx.{name}")));
+    }
+    if section.n_items() > 0 {
+        menu.append_section(None, &section);
+    }
+    let popover = gtk::PopoverMenu::from_model(Some(&menu));
+    popover.insert_action_group("ctx", Some(&group));
+    popover.set_parent(parent);
+    popover.set_has_arrow(false);
+    popover.set_halign(gtk::Align::Start);
+    popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+    popover.connect_closed(|p| {
+        let p = p.clone();
+        glib::idle_add_local_once(move || p.unparent());
+    });
+    popover.popup();
+}
+
+/// Attach a right-click menu built on demand by `items`.
+pub fn context_menu(
+    widget: &impl IsA<gtk::Widget>,
+    items: impl Fn() -> Vec<(String, Callback)> + 'static,
+) {
+    let gesture = gtk::GestureClick::builder().button(3).build();
+    let w = widget.as_ref().downgrade();
+    gesture.connect_pressed(move |g, _, x, y| {
+        g.set_state(gtk::EventSequenceState::Claimed);
+        if let Some(w) = w.upgrade() {
+            popup_menu(&w, x, y, items());
+        }
+    });
+    widget.add_controller(gesture);
 }

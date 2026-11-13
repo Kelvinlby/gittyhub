@@ -40,7 +40,14 @@ A Git client with deep GitHub integration, aiming to grow into sub-IDE-grade sof
   remote), so they run locally even for SSH-hosted checkouts.
 - App: `repo::Ctx` is the per-tab context (location, slug, status, toasts); use `ctx.load` for
   reads, `ctx.git` for repo-changing ops (shows errors, then refreshes), `ctx.gh` / `ctx.gh_load`
-  for GitHub. Each sidebar section is a `views::*` module implementing `repo::View`.
+  for GitHub. Each header section is a `views::*` module implementing `repo::View`
+  (`views::columns` puts several side by side; GitHub list/detail screens use
+  `github::master_detail`).
+- The product is edit-centric: the Code view (timeline | file tree | diff/preview/editor) is the
+  default; prefer right-click menus on the thing being acted on over separate tool screens, and
+  use the full window width (no clamped, doc-style pages).
+- Rewriting history (`git_backend::rewrite`) drives `git rebase -i` via `GIT_SEQUENCE_EDITOR` /
+  `GIT_EDITOR` env vars — not `-c core.editor`, which a user's `GIT_EDITOR` would override.
 - Custom icons live in `crates/app/data/icons` and must be fill-only SVGs (GTK's symbolic
   loader ignores strokes).
 

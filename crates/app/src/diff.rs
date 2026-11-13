@@ -1,27 +1,13 @@
-//! Unified-diff viewer with optional per-hunk stage / unstage / discard buttons.
+//! Read-only multi-file diff viewer (stashes, pull requests).
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use git_backend::HunkAction;
 use gtk::{gdk, glib};
 
 use crate::util;
 
 const MAX_LINES: usize = 20_000;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HunkMode {
-    /// Read-only.
-    None,
-    /// Work-tree changes: stage or discard a hunk.
-    Unstaged,
-    /// Index changes: unstage a hunk.
-    Staged,
-}
-
-type HunkHandler = Rc<dyn Fn(String, HunkAction)>;
 
 pub struct DiffView {
     root: gtk::Stack,
@@ -30,17 +16,18 @@ pub struct DiffView {
     tags: gtk::TextTagTable,
     added: gtk::TextTag,
     removed: gtk::TextTag,
-    on_hunk: RefCell<Option<HunkHandler>>,
 }
 
 /// Look up a theme colour by rendering a throwaway label with `class`.
-fn theme_color(class: &str) -> gdk::RGBA {
+pub fn theme_color(class: &str) -> gdk::RGBA {
     let l = gtk::Label::new(None);
-    l.add_css_class(class);
+    if !class.is_empty() {
+        l.add_css_class(class);
+    }
     l.color()
 }
 
-fn tinted(mut c: gdk::RGBA, alpha: f32) -> gdk::RGBA {
+pub fn tinted(mut c: gdk::RGBA, alpha: f32) -> gdk::RGBA {
     c.set_alpha(alpha);
     c
 }
@@ -80,7 +67,6 @@ impl DiffView {
             tags,
             added,
             removed,
-            on_hunk: RefCell::new(None),
         });
         view.recolor();
         let weak = Rc::downgrade(&view);
@@ -104,10 +90,6 @@ impl DiffView {
         self.root.clone().upcast()
     }
 
-    pub fn connect_hunk(&self, f: impl Fn(String, HunkAction) + 'static) {
-        *self.on_hunk.borrow_mut() = Some(Rc::new(f));
-    }
-
     pub fn set_placeholder(&self, icon: &str, title: &str, desc: &str) {
         self.placeholder.set_icon_name(Some(icon));
         self.placeholder.set_title(title);
@@ -115,7 +97,7 @@ impl DiffView {
         self.root.set_visible_child_name("empty");
     }
 
-    pub fn set_diff(&self, diff: &str, mode: HunkMode) {
+    pub fn set_diff(&self, diff: &str) {
         util::clear_box(&self.content);
         let files = git_backend::parse_diff(diff);
         if files.is_empty() {
@@ -142,13 +124,12 @@ impl DiffView {
             } else if file.hunks.is_empty() {
                 card.append(&note("No content changes (mode or rename only)."));
             }
-            let file = Rc::new(file);
-            for (i, hunk) in file.hunks.iter().enumerate() {
+            for hunk in &file.hunks {
                 if budget == 0 {
                     card.append(&note("Diff truncated: too large to display."));
                     break;
                 }
-                card.append(&self.hunk_header(&file, i, hunk, mode));
+                card.append(&self.hunk_header(hunk));
                 card.append(&self.hunk_body(hunk, &mut budget));
             }
             self.content.append(&card);
@@ -156,13 +137,7 @@ impl DiffView {
         self.root.set_visible_child_name("diff");
     }
 
-    fn hunk_header(
-        &self,
-        file: &Rc<git_backend::DiffFile>,
-        i: usize,
-        hunk: &str,
-        mode: HunkMode,
-    ) -> gtk::Box {
+    fn hunk_header(&self, hunk: &str) -> gtk::Box {
         let bar = util::hbox(6);
         bar.add_css_class("diff-hunk-header");
         let first = hunk.lines().next().unwrap_or_default();
@@ -175,29 +150,6 @@ impl DiffView {
                 .css_classes(["mono", "caption"])
                 .build(),
         );
-        let buttons: &[(&str, &str, HunkAction)] = match mode {
-            HunkMode::None => &[],
-            HunkMode::Unstaged => &[
-                ("Discard Hunk", "", HunkAction::Discard),
-                ("Stage Hunk", "", HunkAction::Stage),
-            ],
-            HunkMode::Staged => &[("Unstage Hunk", "", HunkAction::Unstage)],
-        };
-        for (label, _, action) in buttons {
-            let b = gtk::Button::builder()
-                .label(*label)
-                .css_classes(["flat", "small"])
-                .build();
-            let handler = self.on_hunk.borrow().clone();
-            let patch = file.hunk_patch(i);
-            let action = *action;
-            b.connect_clicked(move |_| {
-                if let Some(h) = &handler {
-                    h(patch.clone(), action);
-                }
-            });
-            bar.append(&b);
-        }
         bar
     }
 

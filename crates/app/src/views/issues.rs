@@ -16,7 +16,7 @@ const STATES: [&str; 3] = ["open", "closed", "all"];
 
 pub struct Issues {
     ctx: Rc<Ctx>,
-    nav: adw::NavigationView,
+    nav: adw::NavigationSplitView,
     shell: Shell,
     list: gtk::ListBox,
     state: gtk::DropDown,
@@ -38,7 +38,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     content.append(&top);
     content.append(&list);
     let shell = Shell::new(&util::page_scroller(&content));
-    let nav = adw::NavigationView::new();
+    let nav = github::master_detail("gh-issue-symbolic", "Select an Issue");
     let view = Rc::new(Issues {
         ctx: ctx.clone(),
         nav: nav.clone(),
@@ -91,11 +91,14 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
             );
         });
     });
-    nav.add(&github::nav_page(
-        "Issues",
-        &view.shell.stack,
-        &[new_button.upcast_ref(), &refresh],
-    ));
+    github::set_list(
+        &nav,
+        &github::nav_page(
+            "Issues",
+            &view.shell.stack,
+            &[new_button.upcast_ref(), &refresh],
+        ),
+    );
     let r = reload.clone();
     view.state.connect_selected_notify(move |_| r());
     view.search.connect_activate(move |_| reload());
@@ -104,7 +107,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
 
 impl View for Issues {
     fn widget(&self) -> gtk::Widget {
-        self.nav.clone().upcast()
+        github::root_of(&self.nav)
     }
 
     fn refresh(self: Rc<Self>) {
@@ -163,7 +166,7 @@ impl View for Issues {
     }
 }
 
-fn show_detail(ctx: &Rc<Ctx>, nav: &adw::NavigationView, number: u64) {
+fn show_detail(ctx: &Rc<Ctx>, nav: &adw::NavigationSplitView, number: u64) {
     let content = util::vbox(18);
     let shell = Rc::new(Shell::new(&util::page_scroller(&content)));
     let ctx2 = ctx.clone();
@@ -181,11 +184,10 @@ fn show_detail(ctx: &Rc<Ctx>, nav: &adw::NavigationView, number: u64) {
             f();
         }
     });
-    nav.push(&github::nav_page(
-        &format!("#{number}"),
-        &shell.stack,
-        &[&browser, &refresh],
-    ));
+    github::show_detail(
+        nav,
+        &github::nav_page(&format!("#{number}"), &shell.stack, &[&browser, &refresh]),
+    );
     let load: Callback = {
         let ctx = ctx.clone();
         let reload = reload.clone();

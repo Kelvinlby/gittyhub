@@ -321,6 +321,203 @@ pub fn parse_diff(diff: &str) -> Vec<DiffFile> {
     files
 }
 
+/// Build a patch from selected `+`/`-` lines of `file`.
+///
+/// `selected` holds `(hunk index, line index within the hunk body)` pairs; the hunk's `@@`
+/// line is not counted. With `reverse`, the patch is meant for `git apply -R` against the
+/// *new* side (e.g. discarding lines from the work tree); otherwise for forward application
+/// against the old side (e.g. staging). Apply with `--recount`.
+pub fn partial_patch(
+    file: &DiffFile,
+    selected: &[(usize, usize)],
+    reverse: bool,
+) -> Option<String> {
+    let mut out = file.header.clone();
+    let mut any = false;
+    for (h, hunk) in file.hunks.iter().enumerate() {
+        let sel: Vec<usize> = selected
+            .iter()
+            .filter(|(hh, _)| *hh == h)
+            .map(|(_, l)| *l)
+            .collect();
+        if sel.is_empty() {
+            continue;
+        }
+        let mut lines = hunk.split_inclusive('\n');
+        let Some(head) = lines.next() else { continue };
+        let mut body = String::new();
+        let mut changed = false;
+        let mut last_kept = true;
+        for (i, line) in lines.enumerate() {
+            let picked = sel.contains(&i);
+            match line.as_bytes().first() {
+                Some(b'+') | Some(b'-') => {
+                    let plus = line.starts_with('+');
+                    // The side that must stay intact becomes context; the other is dropped.
+                    let keep_side = if reverse { plus } else { !plus };
+                    if picked {
+                        body.push_str(line);
+                        changed = true;
+                        last_kept = true;
+                    } else if keep_side {
+                        body.push(' ');
+                        body.push_str(&line[1..]);
+                        last_kept = true;
+                    } else {
+                        last_kept = false;
+                    }
+                }
+                Some(b'\\') => {
+                    if last_kept {
+                        body.push_str(line);
+                    }
+                }
+                _ => {
+                    body.push_str(line);
+                    last_kept = true;
+                }
+            }
+        }
+        if changed {
+            any = true;
+            out.push_str(head);
+            out.push_str(&body);
+        }
+    }
+    any.then_some(out)
+}
+
+/// Expand selected lines to the whole contiguous `+`/`-` runs ("changes") containing them,
+/// so discarding a modified line restores the original instead of just deleting the new text.
+pub fn expand_to_changes(file: &DiffFile, selected: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    for &(h, l) in selected {
+        let Some(hunk) = file.hunks.get(h) else {
+            continue;
+        };
+        let kinds: Vec<u8> = hunk
+            .split_inclusive('\n')
+            .skip(1)
+            .map(|x| x.as_bytes().first().copied().unwrap_or(b' '))
+            .collect();
+        let is_change = |i: usize| matches!(kinds.get(i), Some(b'+') | Some(b'-'));
+        if !is_change(l) {
+            continue;
+        }
+        let mut a = l;
+        while a > 0 && (is_change(a - 1) || kinds.get(a - 1) == Some(&b'\\')) {
+            a -= 1;
+        }
+        let mut b = l;
+        while is_change(b + 1) || kinds.get(b + 1) == Some(&b'\\') {
+            b += 1;
+        }
+        for i in a..=b {
+            if is_change(i) && !out.contains(&(h, i)) {
+                out.push((h, i));
+            }
+        }
+    }
+    out
+}
+
+/// Discard the given lines (of a `HEAD`↔work-tree diff) from the work tree.
+pub fn discard_lines(loc: &Location, file: &DiffFile, selected: &[(usize, usize)]) -> Result<()> {
+    let Some(patch) = partial_patch(file, selected, true) else {
+        return Ok(());
+    };
+    loc.git_in(
+        &["apply", "-R", "--recount", "--whitespace=nowarn", "-"],
+        Some(patch.as_bytes()),
+    )
+    .map(drop)
+}
+
+/// Diff of a work-tree file against `HEAD` (staged and unstaged changes together).
+pub fn worktree_diff(loc: &Location, change: &FileChange) -> Result<String> {
+    if change.untracked() {
+        return file_diff(loc, change, false);
+    }
+    if !has_head(loc) {
+        return loc.git(&["diff", "--no-color", "--cached", "--", &change.path]);
+    }
+    loc.git(&[
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "-M",
+        "HEAD",
+        "--",
+        &change.path,
+    ])
+}
+
+pub fn has_head(loc: &Location) -> bool {
+    loc.git_ok(&["rev-parse", "-q", "--verify", "HEAD"])
+}
+
+/// Throw away every change to a file: staged, unstaged, or the file itself if it is new.
+pub fn discard_file(loc: &Location, change: &FileChange) -> Result<()> {
+    if change.untracked() {
+        return loc
+            .git(&["clean", "-f", "-q", "--", &change.path])
+            .map(drop);
+    }
+    if change.index == 'A' || !has_head(loc) {
+        return loc.git(&["rm", "-f", "-q", "--", &change.path]).map(drop);
+    }
+    if let Some(orig) = &change.orig_path {
+        loc.git(&["rm", "-f", "-q", "--", &change.path])?;
+        return loc
+            .git(&[
+                "restore",
+                "--source=HEAD",
+                "--staged",
+                "--worktree",
+                "--",
+                orig,
+            ])
+            .map(drop);
+    }
+    loc.git(&[
+        "restore",
+        "--source=HEAD",
+        "--staged",
+        "--worktree",
+        "--",
+        &change.path,
+    ])
+    .map(drop)
+}
+
+/// Commit exactly `include` (paths of changed files); other changes stay uncommitted.
+pub fn commit_paths(
+    loc: &Location,
+    include: &[&str],
+    exclude: &[&str],
+    message: &str,
+    amend: bool,
+    signoff: bool,
+) -> Result<()> {
+    if !include.is_empty() {
+        let mut args = vec!["add", "-A", "--"];
+        args.extend(include);
+        loc.git(&args)?;
+    }
+    if !exclude.is_empty() {
+        if has_head(loc) {
+            let mut args = vec!["reset", "-q", "--"];
+            args.extend(exclude);
+            loc.git(&args)?;
+        } else {
+            let mut args = vec!["rm", "--cached", "-r", "-q", "--ignore-unmatch", "--"];
+            args.extend(exclude);
+            loc.git(&args)?;
+        }
+    }
+    commit(loc, message, amend, signoff)
+}
+
 // ---------------------------------------------------------------------------
 // Commits
 
@@ -450,6 +647,216 @@ pub fn show(loc: &Location, oid: &str) -> Result<CommitDetail> {
     })
 }
 
+/// A file touched by a commit (compared with its first parent).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitFile {
+    pub status: char,
+    pub path: String,
+    pub orig_path: Option<String>,
+}
+
+pub fn commit_files(loc: &Location, oid: &str) -> Result<Vec<CommitFile>> {
+    let raw = loc.git(&[
+        "diff-tree",
+        "-r",
+        "-M",
+        "-z",
+        "--name-status",
+        "--root",
+        "-m",
+        "--first-parent",
+        "--no-commit-id",
+        oid,
+    ])?;
+    let mut parts = raw.split('\0').filter(|s| !s.is_empty());
+    let mut out = Vec::new();
+    while let Some(st) = parts.next() {
+        let status = st.chars().next().unwrap_or('M');
+        if status == 'R' || status == 'C' {
+            let (Some(old), Some(new)) = (parts.next(), parts.next()) else {
+                break;
+            };
+            out.push(CommitFile {
+                status,
+                path: new.into(),
+                orig_path: Some(old.into()),
+            });
+        } else if let Some(p) = parts.next() {
+            out.push(CommitFile {
+                status,
+                path: p.into(),
+                orig_path: None,
+            });
+        }
+    }
+    Ok(out)
+}
+
+pub fn commit_file_diff(loc: &Location, oid: &str, file: &CommitFile) -> Result<String> {
+    let mut args = vec![
+        "show",
+        "--format=",
+        "--no-color",
+        "-M",
+        "-m",
+        "--first-parent",
+        oid,
+        "--",
+    ];
+    args.push(&file.path);
+    if let Some(o) = &file.orig_path {
+        args.push(o);
+    }
+    loc.git(&args)
+}
+
+/// Commits reachable from `HEAD` that no remote-tracking branch contains.
+pub fn unpushed(loc: &Location) -> Result<std::collections::HashSet<String>> {
+    if !has_head(loc) {
+        return Ok(Default::default());
+    }
+    Ok(loc
+        .git(&["rev-list", "-n1000", "HEAD", "--not", "--remotes"])?
+        .lines()
+        .map(str::to_owned)
+        .collect())
+}
+
+/// All work-tree files (tracked and untracked, not ignored).
+pub fn worktree_files(loc: &Location) -> Result<Vec<String>> {
+    Ok(loc
+        .git(&[
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ])?
+        .split('\0')
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect())
+}
+
+/// All files in the tree of `rev`.
+pub fn tree_files(loc: &Location, rev: &str) -> Result<Vec<String>> {
+    Ok(loc
+        .git(&["ls-tree", "-r", "-z", "--name-only", rev])?
+        .split('\0')
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+/// How [`rewrite`] changes one commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Rewrite {
+    /// Fold the commit into its parent, combining messages.
+    Squash,
+    /// Fold the commit into its parent, keeping the parent's message.
+    Fixup,
+    /// Remove the commit and its changes.
+    Drop,
+    /// Replace the commit message.
+    Reword(String),
+}
+
+/// Rewrite history at `oid` with a scripted interactive rebase (autostashing local changes).
+pub fn rewrite(loc: &Location, oid: &str, how: Rewrite) -> Result<()> {
+    let is_head = loc.git(&["rev-parse", "HEAD"])?.trim() == loc.git(&["rev-parse", oid])?.trim();
+    if let Rewrite::Reword(msg) = &how
+        && is_head
+    {
+        return loc
+            .git_in(
+                &["commit", "--amend", "--only", "-F", "-"],
+                Some(msg.as_bytes()),
+            )
+            .map(drop);
+    }
+    // Squash/fixup act on the commit *and* its parent, so the rebase starts one further back.
+    let fold = matches!(how, Rewrite::Squash | Rewrite::Fixup);
+    let first = if fold {
+        format!("{oid}^")
+    } else {
+        oid.to_owned()
+    };
+    let base = format!("{first}^");
+    let has_base = loc.git_ok(&["rev-parse", "-q", "--verify", &base]);
+    if fold && !loc.git_ok(&["rev-parse", "-q", "--verify", &first]) {
+        bail!("the first commit has no parent to squash into");
+    }
+    let range = if has_base {
+        format!("{base}..HEAD")
+    } else {
+        "HEAD".into()
+    };
+    if !loc
+        .git(&["rev-list", "--merges", &range])?
+        .trim()
+        .is_empty()
+    {
+        bail!("rewriting history across merge commits is not supported");
+    }
+    let (line, verb) = match &how {
+        Rewrite::Squash => (2, "squash"),
+        Rewrite::Fixup => (2, "fixup"),
+        Rewrite::Drop => (1, "drop"),
+        Rewrite::Reword(_) => (1, "reword"),
+    };
+    let seq = format!("sed -i {line}s/^pick/{verb}/");
+    let mut editor = "true".to_owned();
+    if let Rewrite::Reword(msg) = &how {
+        let git_dir = loc
+            .git(&["rev-parse", "--absolute-git-dir"])?
+            .trim()
+            .to_owned();
+        let msg_file = format!("{git_dir}/GITTYHUB_REWORD_MSG");
+        loc.shell(
+            &format!("cat > {}", shell_quote(&msg_file)),
+            Some(msg.as_bytes()),
+        )?;
+        editor = format!("cp {}", shell_quote(&msg_file));
+    }
+    let mut args = vec!["rebase", "-i", "--autostash"];
+    if has_base {
+        args.push(&base);
+    } else {
+        args.push("--root");
+    }
+    let env = [
+        ("GIT_SEQUENCE_EDITOR", seq.as_str()),
+        ("GIT_EDITOR", editor.as_str()),
+    ];
+    // On conflicts the rebase stays in progress for the user to resolve or abort.
+    loc.git_env(&env, &args, None).map(drop)
+}
+
+/// Combine all commits after `base` into one new commit with `message`.
+pub fn squash_since(loc: &Location, base: &str, message: &str) -> Result<()> {
+    loc.git(&["reset", "--soft", base])?;
+    loc.git_in(&["commit", "-F", "-"], Some(message.as_bytes()))
+        .map(drop)
+}
+
+/// Full messages of `base..HEAD`, oldest first.
+pub fn messages_since(loc: &Location, base: &str) -> Result<String> {
+    loc.git(&["log", "--reverse", "--format=%B", &format!("{base}..HEAD")])
+}
+
+/// Add a pattern to the repository's `.gitignore`.
+pub fn ignore(loc: &Location, pattern: &str) -> Result<()> {
+    let mut cur = loc.read_file(".gitignore").unwrap_or_default();
+    if !cur.is_empty() && !cur.ends_with(b"\n") {
+        cur.push(b'\n');
+    }
+    cur.extend_from_slice(pattern.as_bytes());
+    cur.push(b'\n');
+    loc.write_file(".gitignore", &cur)
+}
+
 pub fn cherry_pick(loc: &Location, oid: &str) -> Result<()> {
     loc.git(&["cherry-pick", oid]).map(drop)
 }
@@ -482,13 +889,13 @@ pub fn undo_last_commit(loc: &Location) -> Result<()> {
 /// Continue / abort whatever multi-step operation is in progress.
 pub fn continue_op(loc: &Location, state: RepoState) -> Result<()> {
     let args: &[&str] = match state {
-        RepoState::Merging => &["-c", "core.editor=true", "merge", "--continue"],
-        RepoState::Rebasing => &["-c", "core.editor=true", "rebase", "--continue"],
-        RepoState::CherryPicking => &["-c", "core.editor=true", "cherry-pick", "--continue"],
-        RepoState::Reverting => &["-c", "core.editor=true", "revert", "--continue"],
+        RepoState::Merging => &["merge", "--continue"],
+        RepoState::Rebasing => &["rebase", "--continue"],
+        RepoState::CherryPicking => &["cherry-pick", "--continue"],
+        RepoState::Reverting => &["revert", "--continue"],
         RepoState::Clean => return Ok(()),
     };
-    loc.git(args).map(drop)
+    loc.git_env(&[("GIT_EDITOR", "true")], args, None).map(drop)
 }
 
 pub fn abort_op(loc: &Location, state: RepoState) -> Result<()> {
@@ -985,6 +1392,19 @@ u UU N... 100644 100644 100644 100644 a b c conflict.txt\0? new.txt\0";
         assert_eq!(files[0].hunks.len(), 2);
         assert!(files[0].hunk_patch(1).ends_with("@@ -9 +9 @@\n-c\n+d\n"));
         assert!(files[0].hunk_patch(1).starts_with("diff --git"));
+    }
+
+    #[test]
+    fn partial_patches() {
+        let d = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n a\n-b\n-c\n+B\n+C\n";
+        let f = &parse_diff(d)[0];
+        // Body lines: 0 " a", 1 "-b", 2 "-c", 3 "+B", 4 "+C". Discard only the "+B" line.
+        let p = partial_patch(f, &[(0, 3)], true).unwrap();
+        assert!(p.ends_with("@@ -1,3 +1,3 @@\n a\n+B\n C\n"), "{p}");
+        // Forward (stage) only the "-b" line.
+        let p = partial_patch(f, &[(0, 1)], false).unwrap();
+        assert!(p.ends_with(" a\n-b\n c\n"), "{p}");
+        assert!(partial_patch(f, &[], true).is_none());
     }
 
     #[test]

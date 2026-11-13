@@ -11,7 +11,7 @@ use crate::util;
 
 pub struct Packages {
     ctx: Rc<Ctx>,
-    nav: adw::NavigationView,
+    nav: adw::NavigationSplitView,
     shell: Shell,
     list: gtk::ListBox,
 }
@@ -22,7 +22,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     let content = util::vbox(18);
     content.append(&list);
     let shell = Shell::new(&util::page_scroller(&content));
-    let nav = adw::NavigationView::new();
+    let nav = github::master_detail("gh-package-symbolic", "Select a Package");
     let view = Rc::new(Packages {
         ctx: ctx.clone(),
         nav: nav.clone(),
@@ -35,17 +35,16 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
             v.refresh();
         }
     });
-    nav.add(&github::nav_page(
-        "Packages",
-        &view.shell.stack,
-        &[&refresh],
-    ));
+    github::set_list(
+        &nav,
+        &github::nav_page("Packages", &view.shell.stack, &[&refresh]),
+    );
     view
 }
 
 impl View for Packages {
     fn widget(&self) -> gtk::Widget {
-        self.nav.clone().upcast()
+        github::root_of(&self.nav)
     }
 
     fn refresh(self: Rc<Self>) {
@@ -93,7 +92,7 @@ impl View for Packages {
     }
 }
 
-fn show_versions(ctx: &Rc<Ctx>, nav: &adw::NavigationView, pkg: Package) {
+fn show_versions(ctx: &Rc<Ctx>, nav: &adw::NavigationSplitView, pkg: Package) {
     let list = util::boxed_list();
     util::placeholder(&list, "No versions");
     let content = util::vbox(12);
@@ -101,7 +100,7 @@ fn show_versions(ctx: &Rc<Ctx>, nav: &adw::NavigationView, pkg: Package) {
     let shell = Rc::new(Shell::new(&util::page_scroller(&content)));
     let url = pkg.html_url.clone();
     let browser = github::browser_button(ctx, move || url.clone());
-    nav.push(&github::nav_page(&pkg.name, &shell.stack, &[&browser]));
+    github::show_detail(nav, &github::nav_page(&pkg.name, &shell.stack, &[&browser]));
     shell.begin(ctx);
     ctx.gh_load(
         move |s| gh_backend::package_versions(s, &pkg),

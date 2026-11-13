@@ -11,23 +11,35 @@ GittyHub uses the tools you already have as its backend:
 
 ## Features
 
-- **Tabs** — one tab per repository; open tabs are restored on startup.
+GittyHub is built around your edits rather than a list of tools. Each repository opens in a
+tab with GitHub-style sections — **Code**, Branches, Pull Requests, Issues, Actions, Releases,
+Deploy and Settings — and starts on Code:
+
+- **Timeline** (left): uncommitted changes, then commits not yet pushed, then pushed history.
+  Right-click a commit to edit its message, squash or fixup into the previous commit, drop it,
+  undo it, revert, cherry-pick, reset, branch or tag from it. "Not Pushed" can be squashed into
+  one commit or pushed in one go.
+- **File tree** (middle): the changed files of the selected entry in their folders, or every
+  file. Checkboxes choose what goes into the next commit; right-click to discard, ignore,
+  restore an old version, view history or blame.
+- **File pane** (right): the diff with line numbers — right-click a line, a selection or a hunk
+  to discard just that change — or a rendered preview (Markdown is rendered), or an editor
+  (Ctrl+S saves, also on SSH hosts).
+- **Commit composer**: leave the summary empty and it uses “Update <file names>”.
+
+Also:
+
 - **Local and remote repositories** — open, clone or create repositories on this machine or on
   any host you can reach over SSH. Remote repositories run `git` on the host through your system
   `ssh` client, so hosts, keys and `ssh-agent` come from your own `~/.ssh` setup.
-- **Changes** — stage, unstage and discard whole files or single hunks; commit, amend, sign off,
-  undo the last commit; resolve conflicts and continue or abort merges, rebases and cherry-picks.
-- **History** — searchable log (current branch or all), commit diffs, check out, branch or tag
-  from a commit, cherry-pick, revert, soft/mixed/hard reset.
-- **Branches, tags, stashes and remotes** — create, switch, merge, squash-merge, rebase, rename,
-  delete (locally or on the remote), push, fetch, pull (merge, rebase or fast-forward only).
-- **Files** — browse the tree at any revision, view files, blame and per-file history.
-- **GitHub** (via `gh`) — repository overview and settings, star and fork, publish a local
-  repository; pull requests (create, review, merge, check out, comment, diff, checks); issues;
-  Actions (runs, jobs, logs, re-run, cancel, dispatch, enable/disable workflows); releases
-  (create, publish, upload and download assets); deployments and environments; packages.
+- **Branches, tags and stashes** side by side; fetch, pull (merge, rebase or fast-forward only)
+  and push from the header's sync button, with background fetching.
+- **GitHub** (via `gh`) — pull requests (create, review, merge, check out, comment, diff,
+  checks), issues, Actions (runs, jobs, logs, re-run, cancel, dispatch, enable/disable
+  workflows), releases (assets), deployments, packages, and repository settings (star, fork,
+  visibility, archive, publish a local repository). Lists and details sit side by side.
 - **Appearance** — follows GNOME's light/dark preference or forces either, with a choice of
-  accent colours; adaptive layout for narrow windows.
+  accent colours; adapts to narrow windows.
 
 ## Requirements
 
@@ -58,8 +70,10 @@ shows up in the app grid):
 crates/
 ├─ app/          GTK 4 + libadwaita user interface (binary `gittyhub`)
 │  ├─ src/window.rs   tabs, header bar, welcome screen
-│  ├─ src/repo.rs     one repository tab: sidebar, sync button, shared context
-│  ├─ src/views/      one module per sidebar section
+│  ├─ src/repo.rs     one repository tab: view switcher, sync button, shared context
+│  ├─ src/views/      one module per section (code.rs is the main editor view)
+│  ├─ src/tree.rs     file tree widget
+│  ├─ src/markdown.rs Markdown → GTK widgets
 │  └─ data/           GResource: stylesheet and symbolic icons
 ├─ git-backend/  wrapper around the git CLI, locally or over SSH (`Location`)
 └─ gh-backend/   wrapper around the gh CLI (JSON output → typed structs)

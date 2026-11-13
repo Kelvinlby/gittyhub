@@ -186,3 +186,61 @@ pub fn poll_while_mapped(
         glib::ControlFlow::Continue
     });
 }
+
+/// A list | detail split that collapses to one pane on narrow windows.
+pub fn master_detail(icon: &str, empty_title: &str) -> adw::NavigationSplitView {
+    let empty = util::status_page(icon, empty_title, "");
+    let placeholder = adw::NavigationPage::builder()
+        .title(empty_title)
+        .child(&empty)
+        .build();
+    let split = adw::NavigationSplitView::builder()
+        .content(&placeholder)
+        .min_sidebar_width(360.0)
+        .max_sidebar_width(620.0)
+        .sidebar_width_fraction(0.38)
+        .build();
+    unsafe {
+        split.set_data("placeholder", placeholder);
+    }
+    split
+}
+
+/// The widget to embed: the split view wrapped in a breakpoint bin that collapses it.
+pub fn root_of(split: &adw::NavigationSplitView) -> gtk::Widget {
+    if let Some(p) = split.parent() {
+        return p;
+    }
+    let root = adw::BreakpointBin::builder()
+        .width_request(360)
+        .height_request(300)
+        .child(split)
+        .build();
+    let bp = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
+        adw::BreakpointConditionLengthType::MaxWidth,
+        860.0,
+        adw::LengthUnit::Sp,
+    ));
+    bp.add_setter(split, "collapsed", Some(&true.to_value()));
+    root.add_breakpoint(bp);
+    root.upcast()
+}
+
+pub fn set_list(split: &adw::NavigationSplitView, page: &adw::NavigationPage) {
+    split.set_sidebar(Some(page));
+}
+
+pub fn show_detail(split: &adw::NavigationSplitView, page: &adw::NavigationPage) {
+    split.set_content(Some(page));
+    split.set_show_content(true);
+}
+
+pub fn clear_detail(split: &adw::NavigationSplitView) {
+    let placeholder = unsafe {
+        split
+            .data::<adw::NavigationPage>("placeholder")
+            .map(|p| p.as_ref().clone())
+    };
+    split.set_content(placeholder.as_ref());
+    split.set_show_content(false);
+}

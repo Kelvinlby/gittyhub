@@ -47,7 +47,7 @@ impl Window {
         let tab_view = adw::TabView::new();
         let tab_bar = adw::TabBar::builder()
             .view(&tab_view)
-            .autohide(false)
+            .autohide(true)
             .build();
 
         // Header bar
@@ -181,10 +181,6 @@ impl Window {
         add(
             "force-push",
             Box::new(|w| w.with_current(|p| p.force_push())),
-        );
-        add(
-            "toggle-sidebar",
-            Box::new(|w| w.with_current(|p| p.toggle_sidebar())),
         );
         add("show-help-overlay", Box::new(|w| shortcuts_dialog(&w.win)));
     }
@@ -520,7 +516,6 @@ fn shortcuts_dialog(win: &adw::ApplicationWindow) {
                 ("Ctrl+Shift+N", "Clone repository"),
                 ("Ctrl+W", "Close tab"),
                 ("F5 / Ctrl+R", "Refresh"),
-                ("F9", "Toggle sidebar"),
             ][..],
         ),
         (
@@ -529,7 +524,8 @@ fn shortcuts_dialog(win: &adw::ApplicationWindow) {
                 ("Ctrl+Shift+F", "Fetch"),
                 ("Ctrl+Shift+P", "Pull"),
                 ("Ctrl+P", "Push"),
-                ("Ctrl+Enter", "Commit (in Changes)"),
+                ("Ctrl+Enter", "Commit (in Code)"),
+                ("Ctrl+S", "Save the file being edited"),
             ][..],
         ),
         (

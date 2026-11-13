@@ -1,9 +1,11 @@
 mod diff;
 mod form;
+mod markdown;
 mod open;
 mod prefs;
 mod repo;
 mod settings;
+mod tree;
 mod util;
 mod views;
 mod window;
@@ -92,5 +94,4 @@ fn startup(app: &adw::Application) {
     app.set_accels_for_action("win.fetch", &["<Control><Shift>f"]);
     app.set_accels_for_action("win.pull", &["<Control><Shift>p"]);
     app.set_accels_for_action("win.push", &["<Control>p"]);
-    app.set_accels_for_action("win.toggle-sidebar", &["F9"]);
 }

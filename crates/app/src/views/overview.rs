@@ -56,7 +56,7 @@ impl Overview {
         util::clear_box(c);
         c.append(&util::heading(&repo.name_with_owner, "title-1"));
         if let Some(d) = repo.description.as_deref().filter(|d| !d.is_empty()) {
-            c.append(&util::body_label(d));
+            c.append(&util::plain_label(d));
         }
         let pills = util::hbox(6);
         pills.append(&util::pill(

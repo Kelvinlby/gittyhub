@@ -14,7 +14,7 @@ use crate::util::{self, Callback};
 
 pub struct Releases {
     ctx: Rc<Ctx>,
-    nav: adw::NavigationView,
+    nav: adw::NavigationSplitView,
     shell: Shell,
     list: gtk::ListBox,
 }
@@ -25,7 +25,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     let content = util::vbox(18);
     content.append(&list);
     let shell = Shell::new(&util::page_scroller(&content));
-    let nav = adw::NavigationView::new();
+    let nav = github::master_detail("gh-tag-symbolic", "Select a Release");
     let view = Rc::new(Releases {
         ctx: ctx.clone(),
         nav: nav.clone(),
@@ -44,11 +44,14 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         .build();
     let c = ctx.clone();
     new_button.connect_clicked(move |_| create_dialog(&c, None));
-    nav.add(&github::nav_page(
-        "Releases",
-        &view.shell.stack,
-        &[new_button.upcast_ref(), &refresh],
-    ));
+    github::set_list(
+        &nav,
+        &github::nav_page(
+            "Releases",
+            &view.shell.stack,
+            &[new_button.upcast_ref(), &refresh],
+        ),
+    );
     view
 }
 
@@ -115,7 +118,7 @@ pub fn create_dialog(ctx: &Rc<Ctx>, tag: Option<String>) {
 
 impl View for Releases {
     fn widget(&self) -> gtk::Widget {
-        self.nav.clone().upcast()
+        github::root_of(&self.nav)
     }
 
     fn refresh(self: Rc<Self>) {
@@ -165,13 +168,13 @@ impl View for Releases {
     }
 }
 
-fn show_detail(ctx: &Rc<Ctx>, nav: &adw::NavigationView, tag: String) {
+fn show_detail(ctx: &Rc<Ctx>, nav: &adw::NavigationSplitView, tag: String) {
     let content = util::vbox(18);
     let shell = Rc::new(Shell::new(&util::page_scroller(&content)));
     let url: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     let u = url.clone();
     let browser = github::browser_button(ctx, move || u.borrow().clone());
-    nav.push(&github::nav_page(&tag, &shell.stack, &[&browser]));
+    github::show_detail(nav, &github::nav_page(&tag, &shell.stack, &[&browser]));
     let reload: Rc<RefCell<Option<Callback>>> = Rc::new(RefCell::new(None));
     let load: Callback = {
         let (ctx, reload, nav) = (ctx.clone(), reload.clone(), nav.clone());
@@ -206,7 +209,7 @@ fn show_detail(ctx: &Rc<Ctx>, nav: &adw::NavigationView, tag: String) {
 
 fn fill(
     ctx: &Rc<Ctx>,
-    nav: &adw::NavigationView,
+    nav: &adw::NavigationSplitView,
     content: &gtk::Box,
     d: &ReleaseDetail,
     reload: Callback,
@@ -308,7 +311,7 @@ fn fill(
                     "Delete Release",
                     move |s| gh_backend::release_delete(s, &tag, cleanup),
                     move |_| {
-                        nav.pop();
+                        github::clear_detail(&nav);
                         c.changed();
                     },
                 );

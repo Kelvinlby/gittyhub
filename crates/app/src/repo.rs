@@ -158,112 +158,68 @@ struct Section {
     id: &'static str,
     title: &'static str,
     icon: &'static str,
-    github: bool,
 }
 
 const SECTIONS: &[Section] = &[
     Section {
-        id: "changes",
-        title: "Changes",
-        icon: "document-edit-symbolic",
-        github: false,
-    },
-    Section {
-        id: "history",
-        title: "History",
-        icon: "gh-commit-symbolic",
-        github: false,
+        id: "code",
+        title: "Code",
+        icon: "gh-code-symbolic",
     },
     Section {
         id: "branches",
         title: "Branches",
         icon: "gh-branch-symbolic",
-        github: false,
-    },
-    Section {
-        id: "stashes",
-        title: "Stashes",
-        icon: "gh-stash-symbolic",
-        github: false,
-    },
-    Section {
-        id: "tags",
-        title: "Tags",
-        icon: "gh-tag-symbolic",
-        github: false,
-    },
-    Section {
-        id: "files",
-        title: "Files",
-        icon: "folder-symbolic",
-        github: false,
-    },
-    Section {
-        id: "remotes",
-        title: "Remotes & Settings",
-        icon: "gh-server-symbolic",
-        github: false,
-    },
-    Section {
-        id: "overview",
-        title: "Overview",
-        icon: "gh-github-symbolic",
-        github: true,
     },
     Section {
         id: "pulls",
         title: "Pull Requests",
         icon: "gh-pull-request-symbolic",
-        github: true,
     },
     Section {
         id: "issues",
         title: "Issues",
         icon: "gh-issue-symbolic",
-        github: true,
     },
     Section {
         id: "actions",
         title: "Actions",
         icon: "gh-actions-symbolic",
-        github: true,
     },
     Section {
         id: "releases",
         title: "Releases",
         icon: "gh-tag-symbolic",
-        github: true,
     },
     Section {
-        id: "deployments",
-        title: "Deployments",
+        id: "deploy",
+        title: "Deploy",
         icon: "gh-deploy-symbolic",
-        github: true,
     },
     Section {
-        id: "packages",
-        title: "Packages",
-        icon: "gh-package-symbolic",
-        github: true,
+        id: "settings",
+        title: "Settings",
+        icon: "emblem-system-symbolic",
     },
 ];
 
 fn build_view(id: &str, ctx: &Rc<Ctx>) -> Rc<dyn View> {
     match id {
-        "changes" => views::changes::new(ctx),
-        "history" => views::history::new(ctx),
-        "branches" => views::branches::new(ctx),
-        "stashes" => views::stashes::new(ctx),
-        "tags" => views::tags::new(ctx),
-        "files" => views::files::new(ctx),
-        "remotes" => views::remotes::new(ctx),
-        "overview" => views::overview::new(ctx),
+        "code" => views::code::new(ctx),
+        "branches" => views::columns(vec![
+            views::branches::new(ctx),
+            views::tags::new(ctx),
+            views::stashes::new(ctx),
+        ]),
         "pulls" => views::pulls::new(ctx),
         "issues" => views::issues::new(ctx),
         "actions" => views::actions::new(ctx),
         "releases" => views::releases::new(ctx),
-        "deployments" => views::deployments::new(ctx),
-        _ => views::packages::new(ctx),
+        "deploy" => views::columns(vec![
+            views::deployments::new(ctx),
+            views::packages::new(ctx),
+        ]),
+        _ => views::columns(vec![views::overview::new(ctx), views::remotes::new(ctx)]),
     }
 }
 
@@ -272,13 +228,10 @@ pub struct RepoPage {
     root: adw::BreakpointBin,
     outer: gtk::Stack,
     error_page: adw::StatusPage,
-    split: adw::OverlaySplitView,
-    sidebar: gtk::ListBox,
-    stack: gtk::Stack,
-    content_title: adw::WindowTitle,
+    stack: adw::ViewStack,
+    bins: HashMap<&'static str, adw::Bin>,
     /// Built views and whether each needs a refresh when next shown.
     views: RefCell<HashMap<&'static str, ViewSlot>>,
-    current: Cell<&'static str>,
     loaded: Cell<bool>,
     // Widgets the window shows in its header bar while this tab is active.
     pub header_start: gtk::Box,
@@ -306,74 +259,22 @@ impl RepoPage {
             navigate: RefCell::new(None),
         });
 
-        // Sidebar
-        let sidebar = gtk::ListBox::builder()
-            .css_classes(["navigation-sidebar"])
-            .build();
+        let stack = adw::ViewStack::new();
+        let mut bins = HashMap::new();
         for s in SECTIONS {
-            let row_box = util::hbox(12);
-            row_box.append(&gtk::Image::from_icon_name(s.icon));
-            row_box.append(&gtk::Label::builder().label(s.title).xalign(0.0).build());
-            let row = gtk::ListBoxRow::builder().child(&row_box).build();
-            row.set_widget_name(s.id);
-            sidebar.append(&row);
+            let bin = adw::Bin::new();
+            stack.add_titled_with_icon(&bin, Some(s.id), s.title, s.icon);
+            bins.insert(s.id, bin);
         }
-        sidebar.set_header_func(|row, before| {
-            let idx = row.index() as usize;
-            let title = if before.is_none() {
-                Some("Repository")
-            } else if SECTIONS[idx].github && !SECTIONS[idx - 1].github {
-                Some("GitHub")
-            } else {
-                None
-            };
-            row.set_header(
-                title
-                    .map(|t| {
-                        gtk::Label::builder()
-                            .label(t)
-                            .xalign(0.0)
-                            .margin_start(12)
-                            .margin_top(if before.is_none() { 6 } else { 18 })
-                            .margin_bottom(6)
-                            .css_classes(["heading", "dim-label"])
-                            .build()
-                    })
-                    .as_ref(),
-            );
-        });
-        let location_label = gtk::Label::builder()
-            .label(ctx.loc.to_string())
-            .ellipsize(gtk::pango::EllipsizeMode::Start)
-            .tooltip_text(ctx.loc.to_string())
-            .xalign(0.0)
-            .margin_start(18)
-            .margin_end(18)
-            .margin_bottom(12)
-            .css_classes(["caption", "dim-label"])
+        let switcher = adw::InlineViewSwitcher::builder()
+            .stack(&stack)
+            .display_mode(adw::InlineViewSwitcherDisplayMode::Both)
+            .homogeneous(false)
+            .css_classes(["flat"])
+            .valign(gtk::Align::Center)
             .build();
-        let side_box = util::vbox(0);
-        side_box.append(
-            &gtk::ScrolledWindow::builder()
-                .child(&sidebar)
-                .vexpand(true)
-                .hscrollbar_policy(gtk::PolicyType::Never)
-                .build(),
-        );
-        side_box.append(&location_label);
-
-        // Content
-        let stack = gtk::Stack::builder()
-            .transition_type(gtk::StackTransitionType::Crossfade)
-            .build();
-        let content_title = adw::WindowTitle::new("", "");
-
-        let split = adw::OverlaySplitView::builder()
-            .sidebar(&side_box)
-            .content(&stack)
-            .min_sidebar_width(200.0)
-            .max_sidebar_width(260.0)
-            .build();
+        let main = adw::ToolbarView::new();
+        main.set_content(Some(&stack));
 
         let error_page = util::status_page("dialog-error-symbolic", "Cannot Open Repository", "");
         let retry = util::text_button("Retry", "pill");
@@ -381,7 +282,7 @@ impl RepoPage {
         error_page.set_child(Some(&retry));
         let outer = gtk::Stack::new();
         outer.add_named(&util::spinner_page(), Some("loading"));
-        outer.add_named(&split, Some("main"));
+        outer.add_named(&main, Some("main"));
         outer.add_named(&error_page, Some("error"));
         toasts.set_child(Some(&outer));
 
@@ -392,26 +293,17 @@ impl RepoPage {
             .build();
         let bp = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
             adw::BreakpointConditionLengthType::MaxWidth,
-            760.0,
+            1100.0,
             adw::LengthUnit::Sp,
         ));
-        bp.add_setter(&split, "collapsed", Some(&true.to_value()));
+        bp.add_setter(
+            &switcher,
+            "display-mode",
+            Some(&adw::InlineViewSwitcherDisplayMode::Icons.to_value()),
+        );
         root.add_breakpoint(bp);
 
-        // Header widgets
-        let sidebar_toggle = gtk::ToggleButton::builder()
-            .icon_name("sidebar-show-symbolic")
-            .tooltip_text("Toggle Sidebar (F9)")
-            .active(true)
-            .build();
-        split
-            .bind_property("show-sidebar", &sidebar_toggle, "active")
-            .bidirectional()
-            .sync_create()
-            .build();
-        let header_start = util::hbox(6);
-        header_start.append(&sidebar_toggle);
-
+        // Branch switcher
         let branch_content = adw::ButtonContent::builder()
             .icon_name("gh-branch-symbolic")
             .label("…")
@@ -446,9 +338,8 @@ impl RepoPage {
             .popover(&popover)
             .tooltip_text("Current Branch")
             .build();
-        let title_box = util::vbox(0);
-        title_box.set_valign(gtk::Align::Center);
-        title_box.append(&branch_button);
+        let header_start = util::hbox(6);
+        header_start.append(&branch_button);
 
         let spinner = adw::Spinner::builder().visible(false).build();
         let sync_menu = gio::Menu::new();
@@ -462,23 +353,20 @@ impl RepoPage {
             .tooltip_text("Fetch, pull or push")
             .build();
         let header_end = util::hbox(6);
-        header_end.append(&sync);
         header_end.append(&spinner);
+        header_end.append(&sync);
 
         let page = Rc::new(RepoPage {
             ctx: ctx.clone(),
             root,
             outer,
             error_page,
-            split,
-            sidebar,
             stack,
-            content_title,
+            bins,
             views: RefCell::new(HashMap::new()),
-            current: Cell::new("changes"),
             loaded: Cell::new(false),
             header_start,
-            header_title: title_box.upcast(),
+            header_title: switcher.upcast(),
             header_end,
             branch_content,
             branch_list,
@@ -490,13 +378,14 @@ impl RepoPage {
 
         // Wiring
         let weak = Rc::downgrade(&page);
-        page.sidebar.connect_row_selected(glib::clone!(
+        page.stack.connect_visible_child_name_notify(glib::clone!(
             #[strong]
             weak,
-            move |_, row| {
-                if let (Some(p), Some(row)) = (weak.upgrade(), row) {
-                    let idx = row.index() as usize;
-                    p.show_section(SECTIONS[idx].id);
+            move |st| {
+                if let (Some(p), Some(name)) = (weak.upgrade(), st.visible_child_name())
+                    && p.loaded.get()
+                {
+                    p.show_section(&name);
                 }
             }
         ));
@@ -533,7 +422,7 @@ impl RepoPage {
             weak,
             move |id: &str| {
                 if let Some(p) = weak.upgrade() {
-                    p.select(id);
+                    p.stack.set_visible_child_name(id);
                 }
             }
         )));
@@ -642,43 +531,33 @@ impl RepoPage {
         Rc::downgrade(self)
     }
 
-    pub fn toggle_sidebar(&self) {
-        self.split.set_show_sidebar(!self.split.shows_sidebar());
-    }
-
-    fn select(&self, id: &str) {
-        if let Some(i) = SECTIONS.iter().position(|s| s.id == id)
-            && let Some(row) = self.sidebar.row_at_index(i as i32)
-        {
-            self.sidebar.select_row(Some(&row));
-        }
-    }
-
-    fn show_section(&self, id: &'static str) {
-        self.current.set(id);
-        let section = SECTIONS.iter().find(|s| s.id == id).expect("section");
-        self.content_title.set_title(section.title);
+    fn show_section(&self, id: &str) {
+        let Some(section) = SECTIONS.iter().find(|s| s.id == id) else {
+            return;
+        };
+        let id = section.id;
         let existing = self.views.borrow().get(id).cloned();
-        let view = match existing {
+        match existing {
             Some((v, dirty)) => {
                 if dirty {
-                    v.clone().refresh();
                     self.views.borrow_mut().insert(id, (v.clone(), false));
+                    v.refresh();
                 }
-                v
             }
             None => {
                 let v = build_view(id, &self.ctx);
-                self.stack.add_named(&v.widget(), Some(id));
-                v.clone().refresh();
+                self.bins[id].set_child(Some(&v.widget()));
                 self.views.borrow_mut().insert(id, (v.clone(), false));
-                v
+                v.refresh();
             }
-        };
-        self.stack.set_visible_child(&view.widget());
-        if self.split.is_collapsed() {
-            self.split.set_show_sidebar(false);
         }
+    }
+
+    fn current_id(&self) -> String {
+        self.stack
+            .visible_child_name()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "code".into())
     }
 
     /// Reload status and the visible view; other views refresh when next shown.
@@ -699,7 +578,8 @@ impl RepoPage {
                         p.update_header();
                         if !p.loaded.replace(true) {
                             p.outer.set_visible_child_name("main");
-                            p.select("changes");
+                            p.stack.set_visible_child_name("code");
+                            p.show_section("code");
                         } else {
                             p.refresh_views();
                         }
@@ -720,15 +600,20 @@ impl RepoPage {
     }
 
     fn refresh_views(&self) {
-        let current = self.current.get();
+        let current = self.current_id();
         let mut views = self.views.borrow_mut();
+        let mut to_refresh = Vec::new();
         for (id, (v, dirty)) in views.iter_mut() {
             if *id == current {
-                v.clone().refresh();
+                to_refresh.push(v.clone());
                 *dirty = false;
             } else {
                 *dirty = true;
             }
+        }
+        drop(views);
+        for v in to_refresh {
+            v.refresh();
         }
     }
 

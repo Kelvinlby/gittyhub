@@ -6,7 +6,7 @@ use adw::prelude::*;
 use git_backend::Stash;
 use gtk::glib;
 
-use crate::diff::{DiffView, HunkMode};
+use crate::diff::DiffView;
 use crate::form::{self, Field};
 use crate::repo::{Ctx, View};
 use crate::util::{self, Callback};
@@ -81,7 +81,7 @@ fn show(ctx: Rc<Ctx>, s: Stash) {
         move |r| match r {
             Ok(d) => {
                 let view = DiffView::new();
-                view.set_diff(&d, HunkMode::None);
+                view.set_diff(&d);
                 util::content_dialog(&c.parent(), &title, &view.widget(), 1000, 720);
             }
             Err(e) => util::show_error(&c.parent(), "Cannot Show Stash", &e),

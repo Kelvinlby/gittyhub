@@ -73,3 +73,12 @@
 .mono {
   font-family: monospace;
 }
+
+.markdown .md-quote {
+  border-left: 3px solid color-mix(in srgb, currentColor 25%, transparent);
+  padding-left: 12px;
+  opacity: 0.85;
+}
+.markdown .md-table label {
+  border-bottom: 1px solid var(--border-color);
+}

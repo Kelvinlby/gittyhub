@@ -7,7 +7,7 @@ use gh_backend::{MergeMethod, PullRequestDetail, ReviewKind};
 use gtk::glib;
 
 use super::github::{self, Shell};
-use crate::diff::{DiffView, HunkMode};
+use crate::diff::DiffView;
 use crate::form::{self, Field};
 use crate::repo::{Ctx, View};
 use crate::util::{self, Callback};
@@ -16,7 +16,7 @@ const STATES: [&str; 4] = ["open", "closed", "merged", "all"];
 
 pub struct Pulls {
     ctx: Rc<Ctx>,
-    nav: adw::NavigationView,
+    nav: adw::NavigationSplitView,
     shell: Shell,
     list: gtk::ListBox,
     state: gtk::DropDown,
@@ -38,7 +38,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     content.append(&top);
     content.append(&list);
     let shell = Shell::new(&util::page_scroller(&content));
-    let nav = adw::NavigationView::new();
+    let nav = github::master_detail("gh-pull-request-symbolic", "Select a Pull Request");
 
     let new_button = gtk::Button::builder()
         .icon_name("list-add-symbolic")
@@ -64,11 +64,14 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     ));
     let c = ctx.clone();
     new_button.connect_clicked(move |_| create_dialog(&c, None));
-    nav.add(&github::nav_page(
-        "Pull Requests",
-        &view.shell.stack,
-        &[new_button.upcast_ref(), &refresh],
-    ));
+    github::set_list(
+        &nav,
+        &github::nav_page(
+            "Pull Requests",
+            &view.shell.stack,
+            &[new_button.upcast_ref(), &refresh],
+        ),
+    );
     view.state.connect_selected_notify(glib::clone!(
         #[strong]
         w,
@@ -92,7 +95,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
 
 impl View for Pulls {
     fn widget(&self) -> gtk::Widget {
-        self.nav.clone().upcast()
+        github::root_of(&self.nav)
     }
 
     fn refresh(self: Rc<Self>) {
@@ -230,7 +233,7 @@ pub fn create_dialog(ctx: &Rc<Ctx>, head: Option<String>) {
     });
 }
 
-fn show_detail(ctx: &Rc<Ctx>, nav: &adw::NavigationView, number: u64) {
+fn show_detail(ctx: &Rc<Ctx>, nav: &adw::NavigationSplitView, number: u64) {
     let content = util::vbox(18);
     let shell = Rc::new(Shell::new(&util::page_scroller(&content)));
     let ctx2 = ctx.clone();
@@ -249,7 +252,7 @@ fn show_detail(ctx: &Rc<Ctx>, nav: &adw::NavigationView, number: u64) {
         }
     });
     let page = github::nav_page(&format!("#{number}"), &shell.stack, &[&browser, &refresh]);
-    nav.push(&page);
+    github::show_detail(nav, &page);
 
     let load: Callback = {
         let ctx = ctx.clone();
@@ -283,7 +286,7 @@ fn show_detail(ctx: &Rc<Ctx>, nav: &adw::NavigationView, number: u64) {
 
 fn fill_detail(
     ctx: &Rc<Ctx>,
-    nav: &adw::NavigationView,
+    nav: &adw::NavigationSplitView,
     content: &gtk::Box,
     pr: &PullRequestDetail,
     reload: Callback,
@@ -619,15 +622,24 @@ fn edit_cb(ctx: &Rc<Ctx>, pr: &PullRequestDetail, reload: &Callback) -> Callback
     })
 }
 
-fn show_diff(ctx: &Rc<Ctx>, nav: &adw::NavigationView, n: u64) {
+fn show_diff(ctx: &Rc<Ctx>, _nav: &adw::NavigationSplitView, n: u64) {
     let diff = DiffView::new();
     diff.set_placeholder("content-loading-symbolic", "Loading…", "");
-    let page = github::nav_page(&format!("#{n} Files Changed"), &diff.widget(), &[]);
-    nav.push(&page);
+    let win = ctx.parent().root().and_downcast::<gtk::Window>();
+    let (w, h) = win
+        .map(|w| (w.width() - 80, w.height() - 80))
+        .unwrap_or((1200, 800));
+    util::content_dialog(
+        &ctx.parent(),
+        &format!("#{n} Files Changed"),
+        &diff.widget(),
+        w,
+        h,
+    );
     ctx.gh_load(
         move |s| gh_backend::pr_diff(s, n),
         move |r| match r {
-            Ok(d) => diff.set_diff(&d, HunkMode::None),
+            Ok(d) => diff.set_diff(&d),
             Err(e) => diff.set_placeholder(
                 "dialog-error-symbolic",
                 "Cannot Load Diff",

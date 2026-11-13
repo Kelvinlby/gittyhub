@@ -91,6 +91,11 @@ impl Location {
 
     /// Build a command that runs `git <args>` inside this location.
     pub fn git_command(&self, args: &[&str]) -> Command {
+        self.git_command_env(&[], args)
+    }
+
+    /// Like [`Location::git_command`] with extra environment variables (which beat git config).
+    pub fn git_command_env(&self, env: &[(&str, &str)], args: &[&str]) -> Command {
         match self {
             Location::Local(path) => {
                 let mut cmd = Command::new("git");
@@ -98,13 +103,19 @@ impl Location {
                 cmd.env("GIT_TERMINAL_PROMPT", "0");
                 cmd.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
                 cmd.env("LC_ALL", "C");
+                cmd.envs(env.iter().copied());
                 cmd
             }
             Location::Ssh { host, path } => {
                 let mut cmd = ssh_command(host);
                 let mut line = String::from(
-                    "env GIT_TERMINAL_PROMPT=0 'GIT_SSH_COMMAND=ssh -o BatchMode=yes' LC_ALL=C git -C ",
+                    "env GIT_TERMINAL_PROMPT=0 'GIT_SSH_COMMAND=ssh -o BatchMode=yes' LC_ALL=C",
                 );
+                for (k, v) in env {
+                    line.push(' ');
+                    line.push_str(&shell_quote(&format!("{k}={v}")));
+                }
+                line.push_str(" git -C ");
                 line.push_str(&shell_quote(path));
                 for a in args {
                     line.push(' ');
@@ -118,7 +129,16 @@ impl Location {
 
     /// Run git, optionally feeding `stdin`, returning the raw output.
     pub fn git_output(&self, args: &[&str], stdin: Option<&[u8]>) -> Result<Output> {
-        let mut cmd = self.git_command(args);
+        self.git_output_env(&[], args, stdin)
+    }
+
+    pub fn git_output_env(
+        &self,
+        env: &[(&str, &str)],
+        args: &[&str],
+        stdin: Option<&[u8]>,
+    ) -> Result<Output> {
+        let mut cmd = self.git_command_env(env, args);
         cmd.stdin(if stdin.is_some() {
             Stdio::piped()
         } else {
@@ -140,7 +160,16 @@ impl Location {
     }
 
     pub fn git_in(&self, args: &[&str], stdin: Option<&[u8]>) -> Result<String> {
-        let out = self.git_output(args, stdin)?;
+        self.git_env(&[], args, stdin)
+    }
+
+    pub fn git_env(
+        &self,
+        env: &[(&str, &str)],
+        args: &[&str],
+        stdin: Option<&[u8]>,
+    ) -> Result<String> {
+        let out = self.git_output_env(env, args, stdin)?;
         if !out.status.success() {
             let err = String::from_utf8_lossy(&out.stderr);
             let msg = if err.trim().is_empty() {
@@ -157,6 +186,56 @@ impl Location {
     pub fn git_lenient(&self, args: &[&str]) -> Result<String> {
         let out = self.git_output(args, None)?;
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    /// Run a shell snippet inside the repository directory (on the remote host for SSH).
+    pub fn shell(&self, script: &str, stdin: Option<&[u8]>) -> Result<Vec<u8>> {
+        let mut cmd = match self {
+            Location::Local(path) => {
+                let mut c = Command::new("sh");
+                c.arg("-c").arg(script).current_dir(path);
+                c
+            }
+            Location::Ssh { host, path } => {
+                let mut c = ssh_command(host);
+                c.arg(format!("cd {} && {script}", shell_quote(path)));
+                c
+            }
+        };
+        cmd.stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+        let mut child = cmd.spawn().context("failed to spawn shell")?;
+        if let Some(input) = stdin {
+            child.stdin.take().context("no stdin")?.write_all(input)?;
+        }
+        let out = child.wait_with_output()?;
+        if !out.status.success() {
+            bail!("{}", String::from_utf8_lossy(&out.stderr).trim());
+        }
+        Ok(out.stdout)
+    }
+
+    /// Read a work-tree file (path relative to the repository root).
+    pub fn read_file(&self, rel: &str) -> Result<Vec<u8>> {
+        match self {
+            Location::Local(p) => Ok(std::fs::read(p.join(rel))?),
+            Location::Ssh { .. } => self.shell(&format!("cat -- {}", shell_quote(rel)), None),
+        }
+    }
+
+    /// Replace a work-tree file's contents.
+    pub fn write_file(&self, rel: &str, data: &[u8]) -> Result<()> {
+        match self {
+            Location::Local(p) => Ok(std::fs::write(p.join(rel), data)?),
+            Location::Ssh { .. } => self
+                .shell(&format!("cat > {}", shell_quote(rel)), Some(data))
+                .map(drop),
+        }
     }
 
     /// Run git, returning whether it succeeded (for `--verify`-style probes).

@@ -14,7 +14,7 @@ use crate::util::{self, Callback};
 
 pub struct Actions {
     ctx: Rc<Ctx>,
-    nav: adw::NavigationView,
+    nav: adw::NavigationSplitView,
     shell: Shell,
     list: gtk::ListBox,
     filter: gtk::DropDown,
@@ -32,7 +32,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     content.append(&top);
     content.append(&list);
     let shell = Shell::new(&util::page_scroller(&content));
-    let nav = adw::NavigationView::new();
+    let nav = github::master_detail("gh-actions-symbolic", "Select a Workflow Run");
     let view = Rc::new(Actions {
         ctx: ctx.clone(),
         nav: nav.clone(),
@@ -76,17 +76,20 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
             }
         });
     }
-    nav.add(&github::nav_page(
-        "Actions",
-        &view.shell.stack,
-        &[run_button.upcast_ref(), manage.upcast_ref(), &refresh],
-    ));
+    github::set_list(
+        &nav,
+        &github::nav_page(
+            "Actions",
+            &view.shell.stack,
+            &[run_button.upcast_ref(), manage.upcast_ref(), &refresh],
+        ),
+    );
     view.filter.connect_selected_notify(move |_| reload());
     // Keep in-progress runs fresh while the list is visible.
     let w2 = w.clone();
     github::poll_while_mapped(&view.nav, 15, move || {
         let Some(v) = w2.upgrade() else { return false };
-        if v.nav.visible_page().is_some_and(|p| p.title() == "Actions") && v.has_active.get() {
+        if v.has_active.get() {
             v.clone().refresh();
         }
         true
@@ -177,7 +180,7 @@ impl Actions {
 
 impl View for Actions {
     fn widget(&self) -> gtk::Widget {
-        self.nav.clone().upcast()
+        github::root_of(&self.nav)
     }
 
     fn refresh(self: Rc<Self>) {
@@ -241,7 +244,7 @@ impl View for Actions {
     }
 }
 
-fn show_run(ctx: &Rc<Ctx>, nav: &adw::NavigationView, id: u64) {
+fn show_run(ctx: &Rc<Ctx>, nav: &adw::NavigationSplitView, id: u64) {
     let content = util::vbox(18);
     let shell = Rc::new(Shell::new(&util::page_scroller(&content)));
     let url: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
@@ -255,7 +258,7 @@ fn show_run(ctx: &Rc<Ctx>, nav: &adw::NavigationView, id: u64) {
         }
     });
     let page = github::nav_page("Workflow Run", &shell.stack, &[&browser, &refresh]);
-    nav.push(&page);
+    github::show_detail(nav, &page);
     let active = Rc::new(std::cell::Cell::new(true));
     let load: Callback = {
         let ctx = ctx.clone();
