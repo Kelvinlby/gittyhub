@@ -44,6 +44,7 @@ pub struct Code {
     commit_btn: gtk::Button,
     tree: Rc<FileTree>,
     tree_mode: adw::ToggleGroup,
+    flat_toggle: gtk::ToggleButton,
     tree_title: gtk::Label,
     file_title: gtk::Label,
     mode: adw::ToggleGroup,
@@ -100,10 +101,10 @@ fn code_view(editable: bool, tags: Option<&gtk::TextTagTable>) -> gtk::TextView 
         .editable(editable)
         .cursor_visible(editable)
         .monospace(true)
-        .top_margin(14)
-        .bottom_margin(14)
+        .top_margin(12)
+        .bottom_margin(12)
         .left_margin(12)
-        .right_margin(16)
+        .right_margin(12)
         .build();
     settings::register_code_view(&view);
     view
@@ -152,11 +153,12 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     // ----- Timeline column
     let search = gtk::SearchEntry::builder()
         .placeholder_text("Search history")
-        .margin_top(10)
-        .margin_bottom(10)
-        .margin_start(10)
-        .margin_end(10)
+        .hexpand(true)
         .build();
+    // Adwaita's `.toolbar` gives in-pane bars uniform 6px padding and spacing.
+    let search_bar = util::hbox(6);
+    search_bar.add_css_class("toolbar");
+    search_bar.append(&search);
     let banner = adw::Banner::builder().button_label("Abort").build();
     let timeline = gtk::ListBox::builder()
         .css_classes(["navigation-sidebar"])
@@ -165,7 +167,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         .label("Load More")
         .css_classes(["flat"])
         .visible(false)
-        .margin_bottom(10)
+        .margin_bottom(6)
         .build();
     let tl_box = util::vbox(0);
     tl_box.append(&timeline);
@@ -188,7 +190,8 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         .max_content_height(140)
         .propagate_natural_height(true)
         .hscrollbar_policy(gtk::PolicyType::Never)
-        .css_classes(["card"])
+        .css_classes(["text-area"])
+        .overflow(gtk::Overflow::Hidden)
         .build();
     let amend = gtk::CheckButton::with_label("Amend last commit");
     let commit_btn = gtk::Button::builder()
@@ -204,7 +207,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
 
     let left = util::vbox(0);
     left.append(&banner);
-    left.append(&search);
+    left.append(&search_bar);
     left.append(&scrolled(&tl_box));
     left.append(&composer);
 
@@ -229,16 +232,20 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         .css_classes(["caption", "dim-label"])
         .margin_start(12)
         .margin_end(12)
+        .margin_bottom(6)
         .build();
     let tree = FileTree::new();
-    let mid = util::vbox(8);
-    let mode_box = util::hbox(0);
-    mode_box.set_margin_top(10);
-    mode_box.set_margin_start(10);
-    mode_box.set_margin_end(10);
+    let mid = util::vbox(0);
+    let mode_box = util::hbox(6);
+    mode_box.add_css_class("toolbar");
     tree_mode.set_hexpand(true);
-    mode_box.set_spacing(6);
     mode_box.append(&tree_mode);
+    let flat_toggle = gtk::ToggleButton::builder()
+        .icon_name("view-list-symbolic")
+        .tooltip_text("Show Files as a Flat List")
+        .active(settings::get().flat_file_list)
+        .build();
+    mode_box.append(&flat_toggle);
     mid.append(&mode_box);
     mid.append(&tree_title);
     mid.append(&tree.widget);
@@ -263,11 +270,9 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         .tooltip_text("Save (Ctrl+S)")
         .visible(false)
         .build();
-    let bar = util::hbox(8);
-    bar.set_margin_top(10);
-    bar.set_margin_bottom(10);
-    bar.set_margin_start(16);
-    bar.set_margin_end(10);
+    let bar = util::hbox(6);
+    bar.add_css_class("toolbar");
+    file_title.set_margin_start(6);
     bar.append(&file_title);
     bar.append(&mode);
     bar.append(&discard_btn);
@@ -348,6 +353,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         commit_btn,
         tree,
         tree_mode,
+        flat_toggle,
         tree_title,
         file_title,
         mode,
@@ -431,6 +437,11 @@ impl Code {
         }
         self.tree_mode
             .connect_active_name_notify(with!(|v: &Rc<Code>| v.load_tree()));
+        self.flat_toggle.connect_toggled(with!(|v: &Rc<Code>| {
+            let flat = v.flat_toggle.is_active();
+            settings::update(|s| s.flat_file_list = flat);
+            v.load_tree();
+        }));
         {
             let w = w.clone();
             self.tree.connect_select(move |path| {
@@ -591,8 +602,8 @@ impl Code {
         menu: Option<Vec<(&str, Callback)>>,
     ) -> gtk::ListBoxRow {
         let b = util::hbox(6);
-        b.set_margin_top(18);
-        b.set_margin_start(10);
+        b.set_margin_top(12);
+        b.set_margin_start(6);
         b.append(
             &gtk::Label::builder()
                 .label(title)
@@ -619,8 +630,8 @@ impl Code {
 
         self.timeline.append(&self.header_row("Uncommitted", None));
         let wt = util::hbox(10);
-        wt.set_margin_top(10);
-        wt.set_margin_bottom(10);
+        wt.set_margin_top(3);
+        wt.set_margin_bottom(3);
         wt.append(&gtk::Image::from_icon_name("document-edit-symbolic"));
         let texts = util::vbox(2);
         texts.append(
@@ -699,7 +710,7 @@ impl Code {
         icon.set_valign(gtk::Align::Start);
         icon.set_margin_top(3);
         b.append(&icon);
-        let texts = util::vbox(4);
+        let texts = util::vbox(3);
         texts.append(
             &gtk::Label::builder()
                 .label(&c.subject)
@@ -774,6 +785,7 @@ impl Code {
 
     fn load_tree(self: &Rc<Self>) {
         let all = self.tree_mode.active_name().as_deref() == Some("all");
+        let flat = self.flat_toggle.is_active();
         let sel = self.sel.borrow().clone();
         let w = Rc::downgrade(self);
         match sel {
@@ -786,7 +798,7 @@ impl Code {
                     .map(|f| (f.path.clone(), Some(change_letter(f))))
                     .collect();
                 if !all {
-                    self.tree.set_files(&files, true, true);
+                    self.tree.set_files(&files, true, true, flat);
                     self.after_tree();
                     return;
                 }
@@ -806,7 +818,7 @@ impl Code {
                             list.push((p.clone(), *st));
                         }
                     }
-                    v.tree.set_files(&list, true, false);
+                    v.tree.set_files(&list, true, false, flat);
                     v.after_tree();
                 });
             }
@@ -838,7 +850,7 @@ impl Code {
                             }
                         }
                         *v.commit_files.borrow_mut() = files;
-                        v.tree.set_files(&list, false, !all);
+                        v.tree.set_files(&list, false, !all, flat);
                         v.after_tree();
                     },
                 );
@@ -1064,10 +1076,10 @@ impl Code {
         } else if let Ok(text) = String::from_utf8(bytes) {
             if is_markdown(path) {
                 let md = markdown::render(&text);
-                md.set_margin_top(32);
-                md.set_margin_bottom(32);
-                md.set_margin_start(48);
-                md.set_margin_end(48);
+                md.set_margin_top(24);
+                md.set_margin_bottom(24);
+                md.set_margin_start(24);
+                md.set_margin_end(24);
                 self.preview.set_child(Some(&scrolled(&md)));
             } else {
                 let view = editor::view(false);

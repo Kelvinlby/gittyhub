@@ -222,8 +222,8 @@ pub fn page_scroller(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
     let child = child.as_ref();
     child.set_margin_top(24);
     child.set_margin_bottom(24);
-    child.set_margin_start(36);
-    child.set_margin_end(36);
+    child.set_margin_start(24);
+    child.set_margin_end(24);
     gtk::ScrolledWindow::builder()
         .child(child)
         .hscrollbar_policy(gtk::PolicyType::Never)

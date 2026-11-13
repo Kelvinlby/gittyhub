@@ -20,6 +20,8 @@ struct Data {
     children: HashMap<String, Vec<String>>,
     status: HashMap<String, char>,
     checkable: bool,
+    /// Flat list: every file at the top level, shown with its (start-ellipsized) path.
+    flat: bool,
 }
 
 pub struct FileTree {
@@ -196,7 +198,22 @@ impl FileTree {
                     .next()
                     .unwrap_or(&path)
                     .to_owned();
-                name.set_label(&display);
+                let flat = data.borrow().flat;
+                if flat && !is_dir {
+                    // Folder dimmed, file name normal; ellipsized at the start so the end of
+                    // the path (the most specific part) stays visible.
+                    let dir = path.strip_suffix(&display).unwrap_or("");
+                    name.set_markup(&format!(
+                        "<span alpha=\"55%\">{}</span>{}",
+                        glib::markup_escape_text(dir),
+                        glib::markup_escape_text(&display)
+                    ));
+                    name.set_ellipsize(gtk::pango::EllipsizeMode::Start);
+                } else {
+                    name.set_text(&display);
+                    name.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+                }
+                expander.set_indent_for_icon(!flat);
                 name.set_tooltip_text(Some(&path));
                 icon.set_icon_name(Some(if is_dir {
                     "folder-symbolic"
@@ -292,7 +309,13 @@ impl FileTree {
     }
 
     /// Replace the tree. `files` are (path, status letter); `expand` opens every folder.
-    pub fn set_files(&self, files: &[(String, Option<char>)], checkable: bool, expand: bool) {
+    pub fn set_files(
+        &self,
+        files: &[(String, Option<char>)],
+        checkable: bool,
+        expand: bool,
+        flat: bool,
+    ) {
         let mut children: HashMap<String, Vec<String>> = HashMap::new();
         let mut status = HashMap::new();
         let mut seen: HashSet<String> = HashSet::new();
@@ -324,11 +347,19 @@ impl FileTree {
                     .then_with(|| a.to_lowercase().cmp(&b.to_lowercase()))
             });
         }
-        let root_items = children.get("").cloned().unwrap_or_default();
+        let root_items = if flat {
+            let mut all: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
+            all.sort_by_key(|p| p.to_lowercase());
+            all.dedup();
+            all
+        } else {
+            children.get("").cloned().unwrap_or_default()
+        };
         *self.data.borrow_mut() = Data {
             children,
             status,
             checkable,
+            flat,
         };
         let root = gio::ListStore::new::<gtk::StringObject>();
         for p in root_items {
@@ -336,6 +367,9 @@ impl FileTree {
         }
         let data = self.data.clone();
         let model = gtk::TreeListModel::new(root, false, expand, move |item| {
+            if data.borrow().flat {
+                return None;
+            }
             let path = item.downcast_ref::<gtk::StringObject>()?.string();
             if !path.ends_with('/') {
                 return None;

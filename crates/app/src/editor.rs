@@ -40,10 +40,10 @@ pub fn view(editable: bool) -> sourceview::View {
         .smart_backspace(true)
         .smart_home_end(sourceview::SmartHomeEndType::Before)
         .tab_width(4)
-        .top_margin(14)
-        .bottom_margin(14)
-        .left_margin(8)
-        .right_margin(16)
+        .top_margin(12)
+        .bottom_margin(12)
+        .left_margin(6)
+        .right_margin(12)
         .build();
     crate::settings::register_code_view(&view);
     view

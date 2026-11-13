@@ -25,6 +25,8 @@ pub struct Settings {
     pub recent: Vec<Location>,
     pub open_tabs: Vec<Location>,
     pub clone_dir: String,
+    /// Show the Code view's files as a flat list instead of a folder tree.
+    pub flat_file_list: bool,
     /// Interface zoom (1.0 = 100%).
     pub ui_zoom: f64,
     /// Font family for code; empty means the system monospace font.
@@ -53,6 +55,7 @@ impl Default for Settings {
             recent: Vec::new(),
             open_tabs: Vec::new(),
             clone_dir: glib::home_dir().join("Code").to_string_lossy().into_owned(),
+            flat_file_list: false,
             ui_zoom: 1.0,
             code_font_family: String::new(),
             code_font_size: 11.0,

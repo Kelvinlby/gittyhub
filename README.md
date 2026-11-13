@@ -19,8 +19,8 @@ Deploy and Settings — and starts on Code:
   Right-click a commit to edit its message, squash or fixup into the previous commit, drop it,
   undo it, revert, cherry-pick, reset, branch or tag from it. "Not Pushed" can be squashed into
   one commit or pushed in one go.
-- **File tree** (middle): the changed files of the selected entry in their folders, or every
-  file. Checkboxes choose what goes into the next commit; right-click to discard, ignore,
+- **File tree** (middle): the changed files of the selected entry in their folders — or as a
+  flat list of paths (toggle next to Changes / All Files) — or every file. Checkboxes choose what goes into the next commit; right-click to discard, ignore,
   restore an old version, view history or blame.
 - **File pane** (right): the diff with line numbers and syntax highlighting — right-click a line, a selection or a hunk
   to discard just that change — or a rendered preview (Markdown is rendered), or an editor with

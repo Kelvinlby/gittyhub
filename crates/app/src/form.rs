@@ -195,7 +195,8 @@ pub async fn run(
                     .max_content_height(320)
                     .propagate_natural_height(true)
                     .hscrollbar_policy(gtk::PolicyType::Never)
-                    .css_classes(["card"])
+                    .css_classes(["text-area"])
+                    .overflow(gtk::Overflow::Hidden)
                     .build();
                 container.append(&title);
                 container.append(&scroller);

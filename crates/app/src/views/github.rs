@@ -119,7 +119,8 @@ pub fn composer(
         .max_content_height(240)
         .propagate_natural_height(true)
         .hscrollbar_policy(gtk::PolicyType::Never)
-        .css_classes(["card"])
+        .css_classes(["text-area"])
+        .overflow(gtk::Overflow::Hidden)
         .build();
     let button = util::text_button(button_label, "suggested-action");
     button.set_halign(gtk::Align::End);

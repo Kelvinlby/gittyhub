@@ -44,7 +44,7 @@
 .pill-label.merged { color: var(--purple-3, var(--accent-color)); }
 
 .commit-box {
-  padding: 16px;
+  padding: 12px;
   border-top: 1px solid var(--border-color);
 }
 
@@ -83,27 +83,6 @@
   border-bottom: 1px solid var(--border-color);
 }
 
-/* Roomier rows in sidebars, the file tree and boxed lists. */
-.navigation-sidebar > row {
-  padding-top: 7px;
-  padding-bottom: 7px;
-}
-.file-tree > row {
-  padding-top: 5px;
-  padding-bottom: 5px;
-}
-.boxed-list > row {
-  min-height: 56px;
-}
-.diff-file-header {
-  padding: 10px 16px;
-}
-.diff-hunk-header {
-  padding: 4px 8px 4px 16px;
-}
-.comment-card {
-  padding: 16px 18px;
-}
 
 /* Right-click menus: menu-sized rows with left-aligned labels. The popover inherits CSS from
    the widget it is attached to, so reset the code font a diff view would pass down. */
@@ -124,4 +103,24 @@ popover.menu .context-menu-item {
 }
 popover.menu separator {
   margin: 6px 0;
+}
+
+/* Divider between side-by-side columns (Branches, Deploy, Settings). */
+.column-divider {
+  border-left: 1px solid var(--border-color);
+}
+
+/* Multi-line text fields (commit description, comments, form text): look like Adwaita
+   entries, with rounded corners the inner text view doesn't paint over. */
+.text-area {
+  background-color: color-mix(in srgb, currentColor 10%, transparent);
+  border-radius: 6px;
+}
+.text-area > textview,
+.text-area > textview > text {
+  background-color: transparent;
+}
+.text-area:focus-within {
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 50%, transparent);
+  outline-offset: -2px;
 }

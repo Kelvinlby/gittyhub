@@ -25,16 +25,19 @@ struct Columns {
 }
 
 pub fn columns(views: Vec<Rc<dyn View>>) -> Rc<dyn View> {
+    // Homogeneous so the columns share the width equally; the divider is part of each column
+    // (rather than a separate child) so it doesn't get a column's share.
     let row = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
+        .homogeneous(true)
         .build();
     for (i, v) in views.iter().enumerate() {
-        if i > 0 {
-            row.append(&gtk::Separator::new(gtk::Orientation::Vertical));
-        }
         let w = v.widget();
         w.set_hexpand(true);
         w.set_vexpand(true);
+        if i > 0 {
+            w.add_css_class("column-divider");
+        }
         row.append(&w);
     }
     let root = adw::BreakpointBin::builder()
