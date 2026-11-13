@@ -40,7 +40,7 @@ Also:
   any host you can reach over SSH. Remote repositories run `git` on the host through your system
   `ssh` client, so hosts, keys and `ssh-agent` come from your own `~/.ssh` setup.
 - **Branches, tags and stashes** side by side; fetch, pull (merge, rebase or fast-forward only)
-  and push from the floating sync bar in the bottom-right corner, with background fetching.
+  and push from the floating sync button in the bottom-right corner, with background fetching.
 - **GitHub** (via `gh`) — pull requests (create, review, merge, check out, comment, diff,
   checks), issues, Actions (runs, jobs, logs, re-run, cancel, dispatch, enable/disable
   workflows), releases (assets), deployments, packages, and repository settings (star, fork,

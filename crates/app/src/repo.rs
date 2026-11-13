@@ -241,11 +241,8 @@ pub struct RepoPage {
     pub header_end: gtk::Box,
     branch_content: adw::ButtonContent,
     branch_list: gtk::ListBox,
-    fetch_btn: gtk::Button,
-    pull_btn: gtk::Button,
-    pull_content: adw::ButtonContent,
-    push_btn: gtk::Button,
-    push_content: adw::ButtonContent,
+    sync: adw::SplitButton,
+    sync_content: adw::ButtonContent,
     spinner: adw::Spinner,
     minutes_since_fetch: Cell<u32>,
     title_listener: RefCell<Option<Rc<dyn Fn()>>>,
@@ -280,45 +277,32 @@ impl RepoPage {
             .css_classes(["flat"])
             .valign(gtk::Align::Center)
             .build();
-        // Floating sync controls (libadwaita's take on a FAB: an OSD pill over the content).
-        let fab = util::hbox(4);
-        fab.add_css_class("osd");
-        fab.add_css_class("sync-fab");
-        fab.set_halign(gtk::Align::End);
-        fab.set_valign(gtk::Align::End);
-        fab.set_margin_end(18);
-        fab.set_margin_bottom(18);
-        let sync_button = |icon: &str, label: &str, tip: &str| {
-            let content = adw::ButtonContent::builder()
-                .icon_name(icon)
-                .label(label)
-                .build();
-            let b = gtk::Button::builder()
-                .child(&content)
-                .tooltip_text(tip)
-                .build();
-            (b, content)
-        };
-        let (fetch_btn, _) = sync_button(
-            "view-refresh-symbolic",
-            "Fetch",
-            "Fetch from all remotes (Ctrl+Shift+F)",
-        );
-        let (pull_btn, pull_content) =
-            sync_button("go-down-symbolic", "Pull", "Pull (Ctrl+Shift+P)");
-        let (push_btn, push_content) = sync_button("go-up-symbolic", "Push", "Push (Ctrl+P)");
-        let more_menu = gio::Menu::new();
-        more_menu.append(Some("Force Push…"), Some("win.force-push"));
-        let more = gtk::MenuButton::builder()
-            .icon_name("view-more-symbolic")
-            .menu_model(&more_menu)
-            .tooltip_text("More")
-            .direction(gtk::ArrowType::Up)
+        // Floating sync button: a suggested-action pill split button over the content (an
+        // "extended FAB" made of standard libadwaita parts). The main part does the next useful
+        // thing; the dropdown has every sync action.
+        let sync_menu = gio::Menu::new();
+        sync_menu.append(Some("Fetch"), Some("win.fetch"));
+        sync_menu.append(Some("Pull"), Some("win.pull"));
+        sync_menu.append(Some("Push"), Some("win.push"));
+        let force = gio::Menu::new();
+        force.append(Some("Force Push…"), Some("win.force-push"));
+        sync_menu.append_section(None, &force);
+        let sync_content = adw::ButtonContent::builder()
+            .icon_name("view-refresh-symbolic")
+            .label("Fetch")
             .build();
-        fab.append(&fetch_btn);
-        fab.append(&pull_btn);
-        fab.append(&push_btn);
-        fab.append(&more);
+        let sync = adw::SplitButton::builder()
+            .child(&sync_content)
+            .menu_model(&sync_menu)
+            .direction(gtk::ArrowType::Up)
+            .dropdown_tooltip("All Sync Actions")
+            .css_classes(["suggested-action", "sync-fab"])
+            .halign(gtk::Align::End)
+            .valign(gtk::Align::End)
+            .margin_end(18)
+            .margin_bottom(18)
+            .build();
+        let fab = sync.clone();
         let overlay = gtk::Overlay::builder().child(&stack).build();
         overlay.add_overlay(&fab);
         let main = adw::ToolbarView::new();
@@ -409,11 +393,8 @@ impl RepoPage {
             header_end,
             branch_content,
             branch_list,
-            fetch_btn,
-            pull_btn,
-            pull_content,
-            push_btn,
-            push_content,
+            sync,
+            sync_content,
             spinner,
             minutes_since_fetch: Cell::new(0),
             title_listener: RefCell::new(None),
@@ -469,19 +450,11 @@ impl RepoPage {
                 }
             }
         )));
-        for (btn, which) in [
-            (page.fetch_btn.clone(), 0),
-            (page.pull_btn.clone(), 1),
-            (page.push_btn.clone(), 2),
-        ] {
+        {
             let weak = weak.clone();
-            btn.connect_clicked(move |_| {
+            page.sync.connect_clicked(move |_| {
                 if let Some(p) = weak.upgrade() {
-                    match which {
-                        0 => p.fetch(),
-                        1 => p.pull(),
-                        _ => p.push(false),
-                    }
+                    p.smart_sync();
                 }
             });
         }
@@ -679,37 +652,58 @@ impl RepoPage {
         self.branch_content.set_label(&head);
         let b = &st.branch;
         let publish = b.upstream.is_none() && b.head != "(detached)";
-        self.pull_content.set_label(&if b.behind > 0 {
-            format!("Pull ↓{}", b.behind)
-        } else {
-            "Pull".into()
-        });
-        self.push_content.set_label(&if publish {
-            "Publish".into()
-        } else if b.ahead > 0 {
-            format!("Push ↑{}", b.ahead)
-        } else {
-            "Push".into()
-        });
-        self.pull_btn.set_sensitive(!publish);
-        // Highlight what a sync would do next.
-        let primary = if publish || (b.ahead > 0 && b.behind == 0) {
-            &self.push_btn
+        let (icon, label, tip) = if publish {
+            (
+                "go-up-symbolic",
+                "Publish Branch".to_owned(),
+                "Push this branch and set its upstream",
+            )
+        } else if b.behind > 0 && b.ahead > 0 {
+            (
+                "go-down-symbolic",
+                format!("Pull ↓{} ↑{}", b.behind, b.ahead),
+                "Pull, then push",
+            )
         } else if b.behind > 0 {
-            &self.pull_btn
+            (
+                "go-down-symbolic",
+                format!("Pull ↓{}", b.behind),
+                "Pull new commits",
+            )
+        } else if b.ahead > 0 {
+            (
+                "go-up-symbolic",
+                format!("Push ↑{}", b.ahead),
+                "Push local commits",
+            )
         } else {
-            &self.fetch_btn
+            (
+                "view-refresh-symbolic",
+                "Fetch".to_owned(),
+                "Fetch from all remotes",
+            )
         };
-        for btn in [&self.fetch_btn, &self.pull_btn, &self.push_btn] {
-            if btn == primary {
-                btn.add_css_class("suggested-action");
-            } else {
-                btn.remove_css_class("suggested-action");
-            }
-        }
+        self.sync_content.set_icon_name(icon);
+        self.sync_content.set_label(&label);
+        self.sync.set_tooltip_text(Some(tip));
         let l = self.title_listener.borrow().clone();
         if let Some(l) = l {
             l();
+        }
+    }
+
+    /// The main sync action: push when ahead (or unpublished), pull when behind, else fetch.
+    fn smart_sync(&self) {
+        let Some(st) = self.ctx.status.borrow().clone() else {
+            return;
+        };
+        let b = st.branch;
+        if (b.upstream.is_none() && b.head != "(detached)") || (b.ahead > 0 && b.behind == 0) {
+            self.push(false);
+        } else if b.behind > 0 {
+            self.pull();
+        } else {
+            self.fetch();
         }
     }
 
