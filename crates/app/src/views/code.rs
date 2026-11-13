@@ -629,11 +629,16 @@ impl Code {
         let n = changes.len();
 
         self.timeline.append(&self.header_row("Uncommitted", None));
-        let wt = util::hbox(10);
-        wt.set_margin_top(3);
-        wt.set_margin_bottom(3);
-        wt.append(&gtk::Image::from_icon_name("document-edit-symbolic"));
-        let texts = util::vbox(2);
+        let wt = util::hbox(12);
+        wt.set_margin_top(12);
+        wt.set_margin_bottom(12);
+        wt.set_margin_start(4);
+        wt.set_margin_end(4);
+        let wt_icon = gtk::Image::from_icon_name("document-edit-symbolic");
+        wt_icon.set_valign(gtk::Align::Start);
+        wt_icon.set_margin_top(2);
+        wt.append(&wt_icon);
+        let texts = util::vbox(6);
         texts.append(
             &gtk::Label::builder()
                 .label(if n == 0 {
@@ -698,9 +703,12 @@ impl Code {
     }
 
     fn commit_row(self: &Rc<Self>, c: &Commit, unpushed: bool) -> gtk::ListBoxRow {
-        let b = util::hbox(10);
-        b.set_margin_top(3);
-        b.set_margin_bottom(3);
+        // Even inner padding: ~12px on every side (the sidebar row adds ~8px horizontally).
+        let b = util::hbox(12);
+        b.set_margin_top(12);
+        b.set_margin_bottom(12);
+        b.set_margin_start(4);
+        b.set_margin_end(4);
         let icon = gtk::Image::from_icon_name(if unpushed {
             "go-up-symbolic"
         } else {
@@ -708,9 +716,9 @@ impl Code {
         });
         icon.add_css_class(if unpushed { "accent" } else { "dim-label" });
         icon.set_valign(gtk::Align::Start);
-        icon.set_margin_top(3);
+        icon.set_margin_top(2);
         b.append(&icon);
-        let texts = util::vbox(3);
+        let texts = util::vbox(6);
         texts.append(
             &gtk::Label::builder()
                 .label(&c.subject)
