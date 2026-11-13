@@ -19,7 +19,7 @@ pub struct Stashes {
 
 pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     let content = util::vbox(24);
-    let new_button = util::text_button("Stash Changes…", "suggested-action");
+    let new_button = util::text_button("Stash Changes", "suggested-action");
     let (group, list) = util::group("Stashes", Some(new_button.upcast_ref()));
     util::placeholder(
         &list,

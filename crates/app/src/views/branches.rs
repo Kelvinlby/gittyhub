@@ -23,7 +23,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         .placeholder_text("Filter branches")
         .hexpand(true)
         .build();
-    let new_button = util::text_button("New Branch…", "suggested-action");
+    let new_button = util::text_button("New Branch", "suggested-action");
     let top = util::hbox(12);
     top.append(&search);
     top.append(&new_button);

@@ -874,10 +874,10 @@ fn welcome_page() -> (gtk::Widget, gtk::ListBox, gtk::Box, adw::ActionRow) {
         .justify(adw::JustifyMode::None)
         .build();
     for (label, action, class) in [
-        ("Open Local…", "win.open-local", "suggested-action"),
-        ("Open over SSH…", "win.open-remote", ""),
-        ("Clone…", "win.clone", ""),
-        ("New Repository…", "win.new-repo", ""),
+        ("Open Local", "win.open-local", "suggested-action"),
+        ("Open over SSH", "win.open-remote", ""),
+        ("Clone", "win.clone", ""),
+        ("New Repository", "win.new-repo", ""),
     ] {
         let b = gtk::Button::builder()
             .label(label)

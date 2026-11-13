@@ -22,7 +22,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         .placeholder_text("Filter tags")
         .hexpand(true)
         .build();
-    let new_button = util::text_button("New Tag…", "suggested-action");
+    let new_button = util::text_button("New Tag", "suggested-action");
     let top = util::hbox(12);
     top.append(&search);
     top.append(&new_button);
