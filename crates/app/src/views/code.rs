@@ -172,6 +172,9 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     if let Some(branch) = ctx.branch_button.borrow_mut().take() {
         search_bar.append(&branch);
     }
+    if let Some(sync) = ctx.sync_widget.borrow_mut().take() {
+        search_bar.append(&sync);
+    }
     search_bar.append(&search);
     let banner = adw::Banner::builder().button_label("Abort").build();
     let timeline = gtk::ListBox::builder()

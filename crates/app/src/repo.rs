@@ -32,6 +32,8 @@ pub struct Ctx {
     navigate: RefCell<Option<Navigator>>,
     /// The branch dropdown, placed by the Code view at the top of its history column.
     pub branch_button: RefCell<Option<gtk::Widget>>,
+    /// The sync control (fetch/pull/push with live progress), placed under the branch dropdown.
+    pub sync_widget: RefCell<Option<gtk::Widget>>,
 }
 
 impl Ctx {
@@ -242,7 +244,14 @@ pub struct RepoPage {
     branch_content: adw::ButtonContent,
     branch_list: gtk::ListBox,
     sync: gtk::Button,
+    sync_more: gtk::MenuButton,
     sync_content: adw::ButtonContent,
+    sync_stack: gtk::Stack,
+    busy_title: gtk::Label,
+    busy_detail: gtk::Label,
+    busy_bar: gtk::ProgressBar,
+    /// A fetch/pull/push is running (only one at a time).
+    sync_busy: Cell<bool>,
     spinner: adw::Spinner,
     minutes_since_fetch: Cell<u32>,
     title_listener: RefCell<Option<Rc<dyn Fn()>>>,
@@ -261,6 +270,7 @@ impl RepoPage {
             busy_listener: RefCell::new(None),
             navigate: RefCell::new(None),
             branch_button: RefCell::new(None),
+            sync_widget: RefCell::new(None),
         });
 
         let stack = adw::ViewStack::new();
@@ -277,9 +287,8 @@ impl RepoPage {
             .css_classes(["flat"])
             .valign(gtk::Align::Center)
             .build();
-        // Floating sync button: a suggested-action pill split button over the content (an
-        // "extended FAB" made of standard libadwaita parts). The main part does the next useful
-        // thing; the dropdown has every sync action.
+        // Sync control: the main button does the next useful sync, the menu has every action.
+        // While git runs, the button shows the phase, percentage, counts and speed with a bar.
         let sync_menu = gio::Menu::new();
         sync_menu.append(Some("Fetch"), Some("win.fetch"));
         sync_menu.append(Some("Pull"), Some("win.pull"));
@@ -291,36 +300,52 @@ impl RepoPage {
             .icon_name("view-refresh-symbolic")
             .label("Fetch")
             .build();
-        // A linked button + menu button rather than AdwSplitButton, whose dropdown part is
-        // hard-wired to a chevron; this one shows a "more" icon.
+        let busy_title = gtk::Label::builder()
+            .xalign(0.0)
+            .hexpand(true)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .build();
+        let busy_detail = gtk::Label::builder()
+            .xalign(0.0)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .css_classes(["caption", "numeric"])
+            .build();
+        let busy_bar = gtk::ProgressBar::builder()
+            .css_classes(["sync-progress"])
+            .pulse_step(0.08)
+            .build();
+        let busy_row = util::hbox(8);
+        busy_row.append(&adw::Spinner::new());
+        busy_row.append(&busy_title);
+        let busy = util::vbox(4);
+        busy.set_margin_top(4);
+        busy.set_margin_bottom(4);
+        busy.append(&busy_row);
+        busy.append(&busy_detail);
+        busy.append(&busy_bar);
+        let sync_stack = gtk::Stack::builder()
+            .vhomogeneous(false)
+            .interpolate_size(true)
+            .transition_type(gtk::StackTransitionType::Crossfade)
+            .build();
+        sync_stack.add_named(&sync_content, Some("idle"));
+        sync_stack.add_named(&busy, Some("busy"));
         let sync = gtk::Button::builder()
-            .child(&sync_content)
-            .css_classes(["suggested-action"])
-            .name("sync-main")
+            .child(&sync_stack)
+            .hexpand(true)
             .build();
         let sync_more = gtk::MenuButton::builder()
             .icon_name("view-more-symbolic")
             .menu_model(&sync_menu)
-            .direction(gtk::ArrowType::Up)
             .tooltip_text("All Sync Actions")
-            .css_classes(["suggested-action"])
-            .name("sync-more")
+            .valign(gtk::Align::Fill)
             .build();
-        // The container clips both halves to one pill shape, whatever their own corners are.
-        let fab = gtk::Box::builder()
-            .css_classes(["linked", "sync-fab"])
-            .overflow(gtk::Overflow::Hidden)
-            .halign(gtk::Align::End)
-            .valign(gtk::Align::End)
-            .margin_end(18)
-            .margin_bottom(18)
-            .build();
-        fab.append(&sync);
-        fab.append(&sync_more);
-        let overlay = gtk::Overlay::builder().child(&stack).build();
-        overlay.add_overlay(&fab);
+        let sync_box = gtk::Box::builder().css_classes(["linked"]).build();
+        sync_box.append(&sync);
+        sync_box.append(&sync_more);
+        *ctx.sync_widget.borrow_mut() = Some(sync_box.upcast());
         let main = adw::ToolbarView::new();
-        main.set_content(Some(&overlay));
+        main.set_content(Some(&stack));
 
         let error_page = util::status_page("dialog-error-symbolic", "Cannot Open Repository", "");
         let retry = util::text_button("Retry", "pill");
@@ -408,7 +433,13 @@ impl RepoPage {
             branch_content,
             branch_list,
             sync,
+            sync_more,
             sync_content,
+            sync_stack,
+            busy_title,
+            busy_detail,
+            busy_bar,
+            sync_busy: Cell::new(false),
             spinner,
             minutes_since_fetch: Cell::new(0),
             title_listener: RefCell::new(None),
@@ -700,6 +731,18 @@ impl RepoPage {
         self.sync_content.set_icon_name(icon);
         self.sync_content.set_label(&label);
         self.sync.set_tooltip_text(Some(tip));
+        // Accent only when there is something to pull or push.
+        let pending = publish || b.ahead > 0 || b.behind > 0;
+        for w in [
+            self.sync.upcast_ref::<gtk::Widget>(),
+            self.sync_more.upcast_ref(),
+        ] {
+            if pending {
+                w.add_css_class("suggested-action");
+            } else {
+                w.remove_css_class("suggested-action");
+            }
+        }
         let l = self.title_listener.borrow().clone();
         if let Some(l) = l {
             l();
@@ -707,7 +750,7 @@ impl RepoPage {
     }
 
     /// The main sync action: push when ahead (or unpublished), pull when behind, else fetch.
-    fn smart_sync(&self) {
+    fn smart_sync(self: &Rc<Self>) {
         let Some(st) = self.ctx.status.borrow().clone() else {
             return;
         };
@@ -721,37 +764,139 @@ impl RepoPage {
         }
     }
 
-    pub fn fetch(&self) {
-        let ctx = self.ctx.clone();
-        self.ctx
-            .git("Fetch", git_backend::fetch, move |_| ctx.toast("Fetched"));
-        self.minutes_since_fetch.set(0);
+    /// Run a sync operation, showing git's live progress inside the sync button.
+    /// `quiet` (background fetches): no toast, no error dialog.
+    fn run_sync(
+        self: &Rc<Self>,
+        verb: &'static str,
+        done_msg: &'static str,
+        quiet: bool,
+        job: impl FnOnce(&Location, &mut dyn FnMut(git_backend::Progress)) -> anyhow::Result<()>
+        + Send
+        + 'static,
+    ) {
+        if self.sync_busy.replace(true) {
+            if !quiet {
+                self.ctx.toast("A sync is already running");
+            }
+            return;
+        }
+        self.busy_title.set_label(&format!("{verb}…"));
+        self.busy_detail.set_label("Connecting");
+        self.busy_bar.set_fraction(0.0);
+        self.sync_stack.set_visible_child_name("busy");
+        // The main button stays enabled so the progress stays readable (a click while busy
+        // just says so); the menu is disabled.
+        self.sync_more.set_sensitive(false);
+
+        let (tx, rx) = std::sync::mpsc::channel::<git_backend::Progress>();
+        let running = Rc::new(Cell::new(true));
+        {
+            let weak = self.weak();
+            let running = running.clone();
+            let mut determinate = false;
+            glib::timeout_add_local(std::time::Duration::from_millis(80), move || {
+                let Some(p) = weak.upgrade() else {
+                    return glib::ControlFlow::Break;
+                };
+                if !running.get() {
+                    return glib::ControlFlow::Break;
+                }
+                if let Some(last) = rx.try_iter().last() {
+                    determinate = last.percent.is_some() && !last.done;
+                    p.show_progress(verb, &last);
+                }
+                if !determinate {
+                    p.busy_bar.pulse();
+                }
+                glib::ControlFlow::Continue
+            });
+        }
+        let weak = self.weak();
+        self.ctx.load(
+            move |l| {
+                let mut send = |p: git_backend::Progress| {
+                    let _ = tx.send(p);
+                };
+                job(l, &mut send)
+            },
+            move |r| {
+                running.set(false);
+                let Some(p) = weak.upgrade() else { return };
+                p.sync_busy.set(false);
+                p.sync_stack.set_visible_child_name("idle");
+                p.sync_more.set_sensitive(true);
+                match r {
+                    Ok(()) => {
+                        if !quiet {
+                            p.ctx.toast(done_msg);
+                        }
+                        p.ctx.changed();
+                    }
+                    Err(e) => {
+                        if !quiet {
+                            util::show_error(&p.ctx.parent(), &format!("{verb} Failed"), &e);
+                            p.ctx.changed();
+                        }
+                    }
+                }
+            },
+        );
     }
 
-    pub fn pull(&self) {
+    /// Show one progress report: "Fetching — Receiving objects 45%",
+    /// "684 / 1,520 · 2.31 MiB | 1.80 MiB/s", and the bar.
+    fn show_progress(&self, verb: &str, p: &git_backend::Progress) {
+        let phase = p.phase.to_lowercase();
+        let title = match p.percent {
+            Some(pct) => format!("{verb} · {phase} {pct}%"),
+            None => format!("{verb} · {phase}"),
+        };
+        self.busy_title.set_label(&title);
+        let mut detail = Vec::new();
+        match (p.current, p.total) {
+            (Some(c), Some(t)) => detail.push(format!("{c} / {t}")),
+            (Some(c), None) => detail.push(c.to_string()),
+            _ => {}
+        }
+        if !p.detail.is_empty() {
+            detail.push(p.detail.clone());
+        }
+        self.busy_detail.set_label(&detail.join(" · "));
+        if let Some(pct) = p.percent {
+            self.busy_bar.set_fraction(f64::from(pct) / 100.0);
+        }
+    }
+
+    pub fn fetch(self: &Rc<Self>) {
+        self.minutes_since_fetch.set(0);
+        self.run_sync("Fetching", "Fetched", false, |l, on| {
+            git_backend::fetch_with_progress(l, on)
+        });
+    }
+
+    pub fn pull(self: &Rc<Self>) {
         let mode = match settings::get().pull_mode.as_str() {
             "rebase" => PullMode::Rebase,
             "ff-only" => PullMode::FastForwardOnly,
             _ => PullMode::Merge,
         };
-        let ctx = self.ctx.clone();
-        self.ctx.git(
-            "Pull",
-            move |l| git_backend::pull(l, mode),
-            move |_| ctx.toast("Pulled"),
+        self.run_sync("Pulling", "Pulled", false, move |l, on| {
+            git_backend::pull_with_progress(l, mode, on)
+        });
+    }
+
+    pub fn push(self: &Rc<Self>, force: bool) {
+        self.run_sync(
+            if force { "Force pushing" } else { "Pushing" },
+            if force { "Force pushed" } else { "Pushed" },
+            false,
+            move |l, on| git_backend::push_with_progress(l, force, on),
         );
     }
 
-    pub fn push(&self, force: bool) {
-        let ctx = self.ctx.clone();
-        self.ctx.git(
-            "Push",
-            move |l| git_backend::push(l, force),
-            move |_| ctx.toast("Pushed"),
-        );
-    }
-
-    pub fn force_push(&self) {
+    pub fn force_push(self: &Rc<Self>) {
+        let weak = self.weak();
         let ctx = self.ctx.clone();
         let this_branch = ctx.branch();
         glib::spawn_future_local(async move {
@@ -765,30 +910,23 @@ impl RepoPage {
                 true,
             )
             .await
+                && let Some(p) = weak.upgrade()
             {
-                let c = ctx.clone();
-                ctx.git(
-                    "Force Push",
-                    |l| git_backend::push(l, true),
-                    move |_| c.toast("Force pushed"),
-                );
+                p.push(true);
             }
         });
     }
 
-    fn auto_fetch_tick(&self) {
+    fn auto_fetch_tick(self: &Rc<Self>) {
         let interval = settings::get().auto_fetch_minutes;
         let n = self.minutes_since_fetch.get() + 1;
         self.minutes_since_fetch.set(n);
-        if interval == 0 || n < interval || !self.loaded.get() {
+        if interval == 0 || n < interval || !self.loaded.get() || self.sync_busy.get() {
             return;
         }
         self.minutes_since_fetch.set(0);
-        let ctx = self.ctx.clone();
-        self.ctx.load(git_backend::fetch, move |r| {
-            if r.is_ok() {
-                ctx.changed();
-            }
+        self.run_sync("Fetching", "Fetched", true, |l, on| {
+            git_backend::fetch_with_progress(l, on)
         });
     }
 

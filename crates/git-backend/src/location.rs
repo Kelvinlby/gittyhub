@@ -238,6 +238,65 @@ impl Location {
         }
     }
 
+    /// Run git and stream its stderr to `on_line`, one segment at a time. Git rewrites
+    /// progress lines in place with `\r`, so both `\r` and `\n` end a segment. Returns stdout;
+    /// on failure the error carries git's messages (without the progress noise).
+    pub fn git_streaming(&self, args: &[&str], on_line: &mut dyn FnMut(&str)) -> Result<String> {
+        use std::io::Read;
+        let mut cmd = self.git_command(args);
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd.spawn().context("failed to spawn git")?;
+        let mut stdout = child.stdout.take().context("no stdout")?;
+        let out_thread = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = stdout.read_to_end(&mut buf);
+            buf
+        });
+        let mut stderr = child.stderr.take().context("no stderr")?;
+        let mut messages = String::new();
+        let mut pending = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let mut emit = |seg: &[u8], messages: &mut String| {
+            let line = String::from_utf8_lossy(seg);
+            let line = line.trim();
+            if line.is_empty() {
+                return;
+            }
+            if crate::parse_progress(line).is_none() {
+                messages.push_str(line);
+                messages.push('\n');
+            }
+            on_line(line);
+        };
+        loop {
+            let n = stderr.read(&mut chunk)?;
+            if n == 0 {
+                break;
+            }
+            for &b in &chunk[..n] {
+                if b == b'\r' || b == b'\n' {
+                    emit(&pending, &mut messages);
+                    pending.clear();
+                } else {
+                    pending.push(b);
+                }
+            }
+        }
+        emit(&pending, &mut messages);
+        let status = child.wait()?;
+        let out = out_thread.join().unwrap_or_default();
+        if !status.success() {
+            bail!(
+                "git {}: {}",
+                args.first().copied().unwrap_or(""),
+                messages.trim()
+            );
+        }
+        Ok(String::from_utf8_lossy(&out).into_owned())
+    }
+
     /// Run git, returning whether it succeeded (for `--verify`-style probes).
     pub fn git_ok(&self, args: &[&str]) -> bool {
         self.git_output(args, None)

@@ -198,6 +198,19 @@ fn clone_dialog(parent: &gtk::Widget, done: Done) {
     let content = util::vbox(18);
     content.append(&form_list);
     content.append(&clone_button);
+    // Live clone progress (git's --progress output): phase, percentage, counts, speed.
+    let progress_label = gtk::Label::builder()
+        .xalign(0.5)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .css_classes(["numeric", "dim-label"])
+        .visible(false)
+        .build();
+    let progress_bar = gtk::ProgressBar::builder()
+        .pulse_step(0.08)
+        .visible(false)
+        .build();
+    content.append(&progress_bar);
+    content.append(&progress_label);
     content.append(&util::heading("Your Repositories", "heading"));
     content.append(&search);
     content.append(&repos);
@@ -335,6 +348,10 @@ fn clone_dialog(parent: &gtk::Widget, done: Done) {
         dir_row,
         #[weak]
         target_row,
+        #[weak]
+        progress_label,
+        #[weak]
+        progress_bar,
         move |button| {
             let mut url = url_row.text().trim().to_owned();
             let parent_dir = dir_row.text().trim().trim_end_matches('/').to_owned();
@@ -342,8 +359,47 @@ fn clone_dialog(parent: &gtk::Widget, done: Done) {
             let host = (target > 0).then(|| hosts[target - 1].clone());
             button.set_sensitive(false);
             button.set_label("Cloning…");
+            progress_label.set_label("Connecting");
+            progress_label.set_visible(true);
+            progress_bar.set_fraction(0.0);
+            progress_bar.set_visible(true);
+            let (tx, rx) = std::sync::mpsc::channel::<git_backend::Progress>();
+            let running = Rc::new(std::cell::Cell::new(true));
+            {
+                let (label, bar, running) = (
+                    progress_label.clone(),
+                    progress_bar.clone(),
+                    running.clone(),
+                );
+                let mut determinate = false;
+                glib::timeout_add_local(std::time::Duration::from_millis(80), move || {
+                    if !running.get() {
+                        return glib::ControlFlow::Break;
+                    }
+                    if let Some(p) = rx.try_iter().last() {
+                        determinate = p.percent.is_some() && !p.done;
+                        let mut text = p.phase.clone();
+                        if let Some(pct) = p.percent {
+                            text.push_str(&format!(" {pct}%"));
+                            bar.set_fraction(f64::from(pct) / 100.0);
+                        }
+                        if let (Some(c), Some(t)) = (p.current, p.total) {
+                            text.push_str(&format!(" · {c} / {t}"));
+                        }
+                        if !p.detail.is_empty() {
+                            text.push_str(&format!(" · {}", p.detail));
+                        }
+                        label.set_label(&text);
+                    }
+                    if !determinate {
+                        bar.pulse();
+                    }
+                    glib::ControlFlow::Continue
+                });
+            }
             let done = done.clone();
             let button = button.clone();
+            let (progress_label, progress_bar) = (progress_label.clone(), progress_bar.clone());
             util::spawn(
                 move || {
                     // Bare owner/name: resolve to a URL using gh's preferred protocol.
@@ -378,22 +434,29 @@ fn clone_dialog(parent: &gtk::Widget, done: Done) {
                         Location::Ssh { path, .. } if !path.starts_with('/') => loc.with_path("."),
                         _ => loc.with_path("/"),
                     };
-                    base.git(&["clone", &url, &dest_path])?;
+                    git_backend::clone_with_progress(&base, &url, &dest_path, &mut |p| {
+                        let _ = tx.send(p);
+                    })?;
                     Ok(loc)
                 },
-                move |r| match r {
-                    Ok(loc) => {
-                        dialog.close();
-                        let top = loc.clone();
-                        util::spawn(
-                            move || git_backend::toplevel(&top).map(|t| top.with_path(&t)),
-                            move |r| done(r.unwrap_or(loc)),
-                        );
-                    }
-                    Err(e) => {
-                        button.set_sensitive(true);
-                        button.set_label("Clone");
-                        util::show_error(&dialog, "Clone Failed", &e);
+                move |r| {
+                    running.set(false);
+                    match r {
+                        Ok(loc) => {
+                            dialog.close();
+                            let top = loc.clone();
+                            util::spawn(
+                                move || git_backend::toplevel(&top).map(|t| top.with_path(&t)),
+                                move |r| done(r.unwrap_or(loc)),
+                            );
+                        }
+                        Err(e) => {
+                            button.set_sensitive(true);
+                            button.set_label("Clone");
+                            progress_label.set_visible(false);
+                            progress_bar.set_visible(false);
+                            util::show_error(&dialog, "Clone Failed", &e);
+                        }
                     }
                 },
             );

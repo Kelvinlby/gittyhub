@@ -1146,6 +1146,84 @@ pub fn set_upstream(loc: &Location, branch: &str, upstream: &str) -> Result<()> 
 }
 
 // ---------------------------------------------------------------------------
+// Progress (git's `--progress` output)
+
+/// One progress report from git, e.g. `Receiving objects:  45% (684/1520), 2.31 MiB | 1.80 MiB/s`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Progress {
+    /// What git is doing: "Receiving objects", "Resolving deltas", "Writing objects", …
+    pub phase: String,
+    pub percent: Option<u32>,
+    pub current: Option<u64>,
+    pub total: Option<u64>,
+    /// Transfer size and speed when git reports them, e.g. "2.31 MiB | 1.80 MiB/s".
+    pub detail: String,
+    pub done: bool,
+}
+
+/// Parse a progress line; `None` for anything else (hints, errors, ref updates).
+pub fn parse_progress(line: &str) -> Option<Progress> {
+    let line = line.trim();
+    let line = line.strip_prefix("remote: ").unwrap_or(line).trim();
+    let (phase, rest) = line.split_once(": ")?;
+    let phase = phase.trim();
+    // Progress phases are short words like "Receiving objects" / "Enumerating objects".
+    if phase.is_empty()
+        || phase.len() > 40
+        || !phase.chars().all(|c| c.is_ascii_alphabetic() || c == ' ')
+    {
+        return None;
+    }
+    let mut p = Progress {
+        phase: phase.to_owned(),
+        ..Default::default()
+    };
+    let mut rest = rest.trim();
+    if let Some(r) = rest.strip_suffix(", done.") {
+        p.done = true;
+        rest = r.trim();
+    } else if let Some(r) = rest.strip_suffix("done.") {
+        p.done = true;
+        rest = r.trim().trim_end_matches(',');
+    }
+    if let Some((pct, after)) = rest.split_once('%') {
+        p.percent = Some(pct.trim().parse().ok()?);
+        rest = after.trim();
+        if let Some(inner) = rest.strip_prefix('(')
+            && let Some((counts, after)) = inner.split_once(')')
+        {
+            if let Some((a, b)) = counts.split_once('/') {
+                p.current = a.trim().parse().ok();
+                p.total = b.trim().parse().ok();
+            }
+            rest = after.trim();
+        }
+    } else {
+        // "Enumerating objects: 1520" — a running count with no total.
+        let n: &str = rest.split([',', ' ']).next().unwrap_or("");
+        p.current = Some(n.parse().ok()?);
+        rest = rest[n.len()..].trim();
+    }
+    let rest = rest.trim_start_matches(',').trim();
+    if rest.contains("iB") || rest.contains("bytes") {
+        p.detail = rest
+            .trim_end_matches(", done.")
+            .trim_end_matches(',')
+            .trim()
+            .to_owned();
+    }
+    Some(p)
+}
+
+fn report_progress<'a>(on: &'a mut dyn FnMut(Progress)) -> impl FnMut(&str) + 'a {
+    move |line: &str| {
+        if let Some(p) = parse_progress(line) {
+            on(p);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Remotes and sync
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1256,25 +1334,72 @@ pub fn pull(loc: &Location, mode: PullMode) -> Result<()> {
 
 /// Push the current branch, setting an upstream on the first push.
 pub fn push(loc: &Location, force: bool) -> Result<()> {
+    push_with_progress(loc, force, &mut |_| {})
+}
+
+/// Arguments for pushing the current branch (setting an upstream on the first push).
+fn push_args(loc: &Location, force: bool) -> Result<Vec<String>> {
     let st = status(loc)?;
-    let mut args = vec!["push"];
+    let mut args = vec!["push".to_owned(), "--progress".to_owned()];
     if force {
-        args.push("--force-with-lease");
+        args.push("--force-with-lease".into());
     }
     if st.branch.upstream.is_none() {
-        let remote = remotes(loc)?
-            .into_iter()
-            .map(|r| r.name)
+        let all = remotes(loc)?;
+        let remote = all
+            .iter()
+            .map(|r| r.name.clone())
             .find(|n| n == "origin")
-            .or_else(|| remotes(loc).ok()?.into_iter().next().map(|r| r.name));
+            .or_else(|| all.first().map(|r| r.name.clone()));
         let Some(remote) = remote else {
             bail!("this repository has no remote to push to");
         };
-        let mut a = args.clone();
-        a.extend(["-u", &remote, &st.branch.head]);
-        return loc.git(&a).map(drop);
+        args.extend(["-u".into(), remote, st.branch.head]);
     }
-    loc.git(&args).map(drop)
+    Ok(args)
+}
+
+pub fn fetch_with_progress(loc: &Location, on: &mut dyn FnMut(Progress)) -> Result<()> {
+    let mut cb = report_progress(on);
+    loc.git_streaming(
+        &["fetch", "--all", "--prune", "--tags", "--progress"],
+        &mut cb,
+    )
+    .map(drop)
+}
+
+pub fn pull_with_progress(
+    loc: &Location,
+    mode: PullMode,
+    on: &mut dyn FnMut(Progress),
+) -> Result<()> {
+    let flag = match mode {
+        PullMode::Merge => "--no-rebase",
+        PullMode::Rebase => "--rebase",
+        PullMode::FastForwardOnly => "--ff-only",
+    };
+    let mut cb = report_progress(on);
+    loc.git_streaming(&["pull", flag, "--progress"], &mut cb)
+        .map(drop)
+}
+
+pub fn push_with_progress(loc: &Location, force: bool, on: &mut dyn FnMut(Progress)) -> Result<()> {
+    let args = push_args(loc, force)?;
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut cb = report_progress(on);
+    loc.git_streaming(&refs, &mut cb).map(drop)
+}
+
+/// Clone `url` into `dest`, run from `base` (see [`clone`]), reporting progress.
+pub fn clone_with_progress(
+    base: &Location,
+    url: &str,
+    dest: &str,
+    on: &mut dyn FnMut(Progress),
+) -> Result<()> {
+    let mut cb = report_progress(on);
+    base.git_streaming(&["clone", "--progress", url, dest], &mut cb)
+        .map(drop)
 }
 
 // ---------------------------------------------------------------------------
@@ -1520,6 +1645,30 @@ u UU N... 100644 100644 100644 100644 a b c conflict.txt\0? new.txt\0";
         let p = partial_patch(f, &[(0, 1)], false).unwrap();
         assert!(p.ends_with(" a\n-b\n c\n"), "{p}");
         assert!(partial_patch(f, &[], true).is_none());
+    }
+
+    #[test]
+    fn progress_lines() {
+        let p =
+            parse_progress("Receiving objects:  45% (684/1520), 2.31 MiB | 1.80 MiB/s").unwrap();
+        assert_eq!(p.phase, "Receiving objects");
+        assert_eq!(
+            (p.percent, p.current, p.total),
+            (Some(45), Some(684), Some(1520))
+        );
+        assert_eq!(p.detail, "2.31 MiB | 1.80 MiB/s");
+        assert!(!p.done);
+        let p = parse_progress("remote: Counting objects: 100% (1520/1520), done.").unwrap();
+        assert_eq!(p.phase, "Counting objects");
+        assert!(p.done);
+        assert_eq!(p.percent, Some(100));
+        let p = parse_progress("remote: Enumerating objects: 1520, done.").unwrap();
+        assert_eq!((p.percent, p.current), (None, Some(1520)));
+        let p = parse_progress("Resolving deltas:  60% (312/520)").unwrap();
+        assert_eq!(p.total, Some(520));
+        assert!(parse_progress("From github.com:a/b").is_none());
+        assert!(parse_progress("error: failed to push some refs to 'x'").is_none());
+        assert!(parse_progress(" * [new branch]      main -> origin/main").is_none());
     }
 
     #[test]

@@ -15,7 +15,9 @@ GittyHub is built around your edits rather than a list of tools. Each repository
 tab with GitHub-style sections — **Code**, Branches, Pull Requests, Issues, Actions, Releases,
 Deploy and Settings — and starts on Code:
 
-- **History** (left): a branch dropdown on top, then one list — uncommitted changes, commits
+- **History** (left): a branch dropdown and the sync button on top — fetch, pull or push, with
+  git's live progress (phase, percentage, object counts, transfer speed and a bar) shown inside
+  the button — then one list — uncommitted changes, commits
   not yet pushed, and pushed history, told apart by their icons. Right-click a commit to edit
   its message, squash or fixup into the previous commit, drop it, undo it, revert,
   cherry-pick, reset, branch or tag from it; unpushed commits can be pushed or squashed into
@@ -36,11 +38,11 @@ Also:
   or SSH, so reopening one is a click. Open more windows with Ctrl+N (or the dock icon's
   “New Window”); drag tabs between windows or out into a new one. Every window's tabs are
   restored on startup.
-- **Local and remote repositories** — open, clone or create repositories on this machine or on
+- **Local and remote repositories** — open, clone (with live progress) or create repositories on this machine or on
   any host you can reach over SSH. Remote repositories run `git` on the host through your system
   `ssh` client, so hosts, keys and `ssh-agent` come from your own `~/.ssh` setup.
 - **Branches, tags and stashes** side by side; fetch, pull (merge, rebase or fast-forward only)
-  and push from the floating sync button in the bottom-right corner, with background fetching.
+  and push from the sync button under the branch dropdown, with background fetching.
 - **GitHub** (via `gh`) — pull requests (create, review, merge, check out, comment, diff,
   checks), issues, Actions (runs, jobs, logs, re-run, cancel, dispatch, enable/disable
   workflows), releases (assets), deployments, packages, and repository settings (star, fork,

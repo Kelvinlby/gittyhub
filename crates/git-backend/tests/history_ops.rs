@@ -189,3 +189,54 @@ fn commit_metadata() {
     assert_eq!((m.files_changed, m.insertions, m.deletions), (2, 3, 1));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn clone_and_fetch_report_progress() {
+    let (src, dir) = repo("progress-src");
+    for i in 0..30 {
+        commit(
+            &src,
+            &format!("f{i}"),
+            &format!("{i}\n").repeat(200),
+            &format!("c{i}"),
+        );
+    }
+    let dest = std::env::temp_dir().join(format!("gittyhub-progress-dst-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dest);
+    let url = format!("file://{}", dir.display());
+    let mut phases: Vec<String> = Vec::new();
+    let mut last = None;
+    git_backend::clone_with_progress(
+        &Location::Local("/".into()),
+        &url,
+        dest.to_str().unwrap(),
+        &mut |p| {
+            if !phases.contains(&p.phase) {
+                phases.push(p.phase.clone());
+            }
+            last = Some(p);
+        },
+    )
+    .unwrap();
+    assert!(
+        phases.iter().any(|p| p == "Receiving objects"),
+        "{phases:?}"
+    );
+    let last = last.unwrap();
+    assert!(last.done || last.percent == Some(100), "{last:?}");
+
+    // Fetch after a new upstream commit also reports progress, and errors carry git's message.
+    commit(&src, "late", "late\n", "late");
+    let clone = Location::Local(dest.clone());
+    let mut n = 0;
+    git_backend::fetch_with_progress(&clone, &mut |_| n += 1).unwrap();
+    assert!(n > 0);
+    let err = clone
+        .git_streaming(&["fetch", "no-such-remote"], &mut |_| {})
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("no-such-remote"), "{err}");
+
+    std::fs::remove_dir_all(dir).unwrap();
+    std::fs::remove_dir_all(dest).unwrap();
+}

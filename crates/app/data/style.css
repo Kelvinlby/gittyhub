@@ -128,31 +128,6 @@ popover.menu separator {
 
 
 
-/* Floating sync button: an accent pill (button + menu), lifted off the content like a FAB.
-   The container clips to the pill; the halves are square inside it. */
-.sync-fab {
-  border-radius: 999px;
-}
-#sync-main,
-#sync-more,
-#sync-more > button {
-  min-height: 40px;
-  border-radius: 0;
-}
-#sync-main {
-  padding-left: 18px;
-  padding-right: 14px;
-}
-#sync-more > button {
-  padding-left: 10px;
-  padding-right: 14px;
-  box-shadow: inset 1px 0 color-mix(in srgb, currentColor 25%, transparent);
-}
-.sync-fab {
-  box-shadow: 0 2px 6px 0 var(--shade-color),
-              0 4px 16px 2px color-mix(in srgb, var(--shade-color) 60%, transparent);
-}
-
 /* Commit details values: plain values get the same left inset as the parent button's padding,
    so the hash, the parent button's text and the change totals all start at the same x. */
 .hash-value {
@@ -162,4 +137,18 @@ button.hash-button {
   font-weight: normal;
   padding: 3px 8px;
   min-height: 0;
+}
+
+/* Sync button progress: a slim bar inside the button, drawn in the button's text colour so
+   it shows on both plain and accent buttons. */
+.sync-progress trough,
+.sync-progress progress {
+  min-height: 4px;
+  border-radius: 999px;
+}
+.sync-progress trough {
+  background-color: color-mix(in srgb, currentColor 20%, transparent);
+}
+.sync-progress progress {
+  background-color: currentColor;
 }
