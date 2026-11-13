@@ -214,12 +214,22 @@ impl Window {
             }
         ));
         // Re-read status when the user comes back to the window (files may have changed).
+        // Re-read status when the user comes back to the window (files may have changed in
+        // another app) — but not when focus only went to one of our own menus or popovers.
+        let left_for_popover = std::rc::Rc::new(std::cell::Cell::new(false));
         self.win.connect_is_active_notify(glib::clone!(
             #[strong]
             weak,
             move |win| {
-                if win.is_active()
-                    && let Some(w) = weak.upgrade()
+                if !win.is_active() {
+                    left_for_popover.set(popover_open(win.upcast_ref()));
+                    return;
+                }
+                // Coming back from (or into) one of our own popovers: nothing outside changed.
+                if left_for_popover.replace(false) || popover_open(win.upcast_ref()) {
+                    return;
+                }
+                if let Some(w) = weak.upgrade()
                     && let Some(p) = w.current()
                 {
                     p.refresh();
@@ -545,6 +555,23 @@ impl Window {
 }
 
 /// The new-tab button and its popover: search, recent repositories, and ways to add one.
+/// Whether any popover (menu, picker, context menu) inside `w` is open.
+fn popover_open(w: &gtk::Widget) -> bool {
+    if w.downcast_ref::<gtk::Popover>()
+        .is_some_and(|p| p.is_visible())
+    {
+        return true;
+    }
+    let mut c = w.first_child();
+    while let Some(x) = c {
+        if popover_open(&x) {
+            return true;
+        }
+        c = x.next_sibling();
+    }
+    false
+}
+
 /// The window size to open with: the saved one, or (first launch) a generous share of the
 /// monitor so everything fits without resizing.
 fn initial_size(s: &settings::Settings) -> (i32, i32) {
