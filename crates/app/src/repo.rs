@@ -30,6 +30,8 @@ pub struct Ctx {
     busy: Cell<u32>,
     busy_listener: RefCell<Option<BusyListener>>,
     navigate: RefCell<Option<Navigator>>,
+    /// The branch dropdown, placed by the Code view at the top of its history column.
+    pub branch_button: RefCell<Option<gtk::Widget>>,
 }
 
 impl Ctx {
@@ -239,7 +241,11 @@ pub struct RepoPage {
     pub header_end: gtk::Box,
     branch_content: adw::ButtonContent,
     branch_list: gtk::ListBox,
-    sync: adw::SplitButton,
+    fetch_btn: gtk::Button,
+    pull_btn: gtk::Button,
+    pull_content: adw::ButtonContent,
+    push_btn: gtk::Button,
+    push_content: adw::ButtonContent,
     spinner: adw::Spinner,
     minutes_since_fetch: Cell<u32>,
     title_listener: RefCell<Option<Rc<dyn Fn()>>>,
@@ -257,6 +263,7 @@ impl RepoPage {
             busy: Cell::new(0),
             busy_listener: RefCell::new(None),
             navigate: RefCell::new(None),
+            branch_button: RefCell::new(None),
         });
 
         let stack = adw::ViewStack::new();
@@ -273,8 +280,49 @@ impl RepoPage {
             .css_classes(["flat"])
             .valign(gtk::Align::Center)
             .build();
+        // Floating sync controls (libadwaita's take on a FAB: an OSD pill over the content).
+        let fab = util::hbox(4);
+        fab.add_css_class("osd");
+        fab.add_css_class("sync-fab");
+        fab.set_halign(gtk::Align::End);
+        fab.set_valign(gtk::Align::End);
+        fab.set_margin_end(18);
+        fab.set_margin_bottom(18);
+        let sync_button = |icon: &str, label: &str, tip: &str| {
+            let content = adw::ButtonContent::builder()
+                .icon_name(icon)
+                .label(label)
+                .build();
+            let b = gtk::Button::builder()
+                .child(&content)
+                .tooltip_text(tip)
+                .build();
+            (b, content)
+        };
+        let (fetch_btn, _) = sync_button(
+            "view-refresh-symbolic",
+            "Fetch",
+            "Fetch from all remotes (Ctrl+Shift+F)",
+        );
+        let (pull_btn, pull_content) =
+            sync_button("go-down-symbolic", "Pull", "Pull (Ctrl+Shift+P)");
+        let (push_btn, push_content) = sync_button("go-up-symbolic", "Push", "Push (Ctrl+P)");
+        let more_menu = gio::Menu::new();
+        more_menu.append(Some("Force Push…"), Some("win.force-push"));
+        let more = gtk::MenuButton::builder()
+            .icon_name("view-more-symbolic")
+            .menu_model(&more_menu)
+            .tooltip_text("More")
+            .direction(gtk::ArrowType::Up)
+            .build();
+        fab.append(&fetch_btn);
+        fab.append(&pull_btn);
+        fab.append(&push_btn);
+        fab.append(&more);
+        let overlay = gtk::Overlay::builder().child(&stack).build();
+        overlay.add_overlay(&fab);
         let main = adw::ToolbarView::new();
-        main.set_content(Some(&stack));
+        main.set_content(Some(&overlay));
 
         let error_page = util::status_page("dialog-error-symbolic", "Cannot Open Repository", "");
         let retry = util::text_button("Retry", "pill");
@@ -336,25 +384,16 @@ impl RepoPage {
         let branch_button = gtk::MenuButton::builder()
             .child(&branch_content)
             .popover(&popover)
-            .tooltip_text("Current Branch")
+            .always_show_arrow(true)
+            .hexpand(true)
+            .tooltip_text("Switch Branch")
             .build();
+        *ctx.branch_button.borrow_mut() = Some(branch_button.upcast());
         let header_start = util::hbox(6);
-        header_start.append(&branch_button);
 
         let spinner = adw::Spinner::builder().visible(false).build();
-        let sync_menu = gio::Menu::new();
-        sync_menu.append(Some("Fetch"), Some("win.fetch"));
-        sync_menu.append(Some("Pull"), Some("win.pull"));
-        sync_menu.append(Some("Push"), Some("win.push"));
-        sync_menu.append(Some("Force Push…"), Some("win.force-push"));
-        let sync = adw::SplitButton::builder()
-            .menu_model(&sync_menu)
-            .label("Fetch")
-            .tooltip_text("Fetch, pull or push")
-            .build();
         let header_end = util::hbox(6);
         header_end.append(&spinner);
-        header_end.append(&sync);
 
         let page = Rc::new(RepoPage {
             ctx: ctx.clone(),
@@ -370,7 +409,11 @@ impl RepoPage {
             header_end,
             branch_content,
             branch_list,
-            sync,
+            fetch_btn,
+            pull_btn,
+            pull_content,
+            push_btn,
+            push_content,
             spinner,
             minutes_since_fetch: Cell::new(0),
             title_listener: RefCell::new(None),
@@ -426,15 +469,22 @@ impl RepoPage {
                 }
             }
         )));
-        page.sync.connect_clicked(glib::clone!(
-            #[strong]
-            weak,
-            move |_| {
+        for (btn, which) in [
+            (page.fetch_btn.clone(), 0),
+            (page.pull_btn.clone(), 1),
+            (page.push_btn.clone(), 2),
+        ] {
+            let weak = weak.clone();
+            btn.connect_clicked(move |_| {
                 if let Some(p) = weak.upgrade() {
-                    p.smart_sync();
+                    match which {
+                        0 => p.fetch(),
+                        1 => p.pull(),
+                        _ => p.push(false),
+                    }
                 }
-            }
-        ));
+            });
+        }
         branch_search.connect_search_changed(glib::clone!(
             #[strong]
             weak,
@@ -628,41 +678,38 @@ impl RepoPage {
         };
         self.branch_content.set_label(&head);
         let b = &st.branch;
-        let (label, tip) = if b.upstream.is_none() && b.head != "(detached)" {
-            (
-                "Publish Branch".to_owned(),
-                "Push this branch and set its upstream",
-            )
-        } else if b.behind > 0 && b.ahead > 0 {
-            (
-                format!("Pull ↓{} ↑{}", b.behind, b.ahead),
-                "Pull, then push",
-            )
-        } else if b.behind > 0 {
-            (format!("Pull ↓{}", b.behind), "Pull new commits")
-        } else if b.ahead > 0 {
-            (format!("Push ↑{}", b.ahead), "Push local commits")
+        let publish = b.upstream.is_none() && b.head != "(detached)";
+        self.pull_content.set_label(&if b.behind > 0 {
+            format!("Pull ↓{}", b.behind)
         } else {
-            ("Fetch".to_owned(), "Fetch from all remotes")
+            "Pull".into()
+        });
+        self.push_content.set_label(&if publish {
+            "Publish".into()
+        } else if b.ahead > 0 {
+            format!("Push ↑{}", b.ahead)
+        } else {
+            "Push".into()
+        });
+        self.pull_btn.set_sensitive(!publish);
+        // Highlight what a sync would do next.
+        let primary = if publish || (b.ahead > 0 && b.behind == 0) {
+            &self.push_btn
+        } else if b.behind > 0 {
+            &self.pull_btn
+        } else {
+            &self.fetch_btn
         };
-        self.sync.set_label(&label);
-        self.sync.set_tooltip_text(Some(tip));
+        for btn in [&self.fetch_btn, &self.pull_btn, &self.push_btn] {
+            if btn == primary {
+                btn.add_css_class("suggested-action");
+            } else {
+                btn.remove_css_class("suggested-action");
+            }
+        }
         let l = self.title_listener.borrow().clone();
         if let Some(l) = l {
             l();
-        }
-    }
-
-    fn smart_sync(&self) {
-        let st = self.ctx.status.borrow().clone();
-        let Some(st) = st else { return };
-        let b = st.branch;
-        if b.upstream.is_none() || (b.ahead > 0 && b.behind == 0) {
-            self.push(false);
-        } else if b.behind > 0 {
-            self.pull();
-        } else {
-            self.fetch();
         }
     }
 

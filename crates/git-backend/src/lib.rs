@@ -901,6 +901,77 @@ pub fn ignore(loc: &Location, pattern: &str) -> Result<()> {
     loc.write_file(".gitignore", &cur)
 }
 
+/// Everything worth showing about one commit, plus its change totals (vs. first parent).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommitMeta {
+    pub oid: String,
+    pub parents: Vec<String>,
+    pub author: String,
+    pub author_email: String,
+    pub author_time: i64,
+    pub committer: String,
+    pub committer_email: String,
+    pub committer_time: i64,
+    pub refs: Vec<String>,
+    pub subject: String,
+    pub body: String,
+    pub files_changed: usize,
+    pub insertions: u64,
+    pub deletions: u64,
+}
+
+pub fn commit_meta(loc: &Location, oid: &str) -> Result<CommitMeta> {
+    let raw = loc.git(&[
+        "show",
+        "-s",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%D%x1f%s%x1f%b",
+        oid,
+    ])?;
+    let f: Vec<&str> = raw.splitn(11, US).collect();
+    if f.len() != 11 {
+        bail!("cannot parse commit {oid}");
+    }
+    let mut meta = CommitMeta {
+        oid: f[0].to_owned(),
+        parents: f[1].split_whitespace().map(str::to_owned).collect(),
+        author: f[2].to_owned(),
+        author_email: f[3].to_owned(),
+        author_time: f[4].parse().unwrap_or(0),
+        committer: f[5].to_owned(),
+        committer_email: f[6].to_owned(),
+        committer_time: f[7].parse().unwrap_or(0),
+        refs: f[8]
+            .split(", ")
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        subject: f[9].to_owned(),
+        body: f[10].trim().to_owned(),
+        ..Default::default()
+    };
+    let stats = loc.git(&[
+        "diff-tree",
+        "--numstat",
+        "-r",
+        "-M",
+        "--root",
+        "-m",
+        "--first-parent",
+        "--no-commit-id",
+        oid,
+    ])?;
+    for line in stats.lines() {
+        let mut it = line.split('\t');
+        let (Some(a), Some(d)) = (it.next(), it.next()) else {
+            continue;
+        };
+        meta.files_changed += 1;
+        meta.insertions += a.parse::<u64>().unwrap_or(0);
+        meta.deletions += d.parse::<u64>().unwrap_or(0);
+    }
+    Ok(meta)
+}
+
 pub fn cherry_pick(loc: &Location, oid: &str) -> Result<()> {
     loc.git(&["cherry-pick", oid]).map(drop)
 }

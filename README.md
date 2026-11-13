@@ -15,10 +15,13 @@ GittyHub is built around your edits rather than a list of tools. Each repository
 tab with GitHub-style sections — **Code**, Branches, Pull Requests, Issues, Actions, Releases,
 Deploy and Settings — and starts on Code:
 
-- **Timeline** (left): uncommitted changes, then commits not yet pushed, then pushed history.
-  Right-click a commit to edit its message, squash or fixup into the previous commit, drop it,
-  undo it, revert, cherry-pick, reset, branch or tag from it. "Not Pushed" can be squashed into
-  one commit or pushed in one go.
+- **History** (left): a branch dropdown on top, then one list — uncommitted changes, commits
+  not yet pushed, and pushed history, told apart by their icons. Right-click a commit to edit
+  its message, squash or fixup into the previous commit, drop it, undo it, revert,
+  cherry-pick, reset, branch or tag from it; unpushed commits can be pushed or squashed into
+  one.
+- **Commit details** (top of the middle column): title, author and dates, refs, hash, parents,
+  change totals and the full message.
 - **File tree** (middle): the changed files of the selected entry in their folders — or as a
   flat list of paths (toggle next to Changes / All Files) — or every file. Checkboxes choose what goes into the next commit; right-click to discard, ignore,
   restore an old version, view history or blame.
@@ -37,7 +40,7 @@ Also:
   any host you can reach over SSH. Remote repositories run `git` on the host through your system
   `ssh` client, so hosts, keys and `ssh-agent` come from your own `~/.ssh` setup.
 - **Branches, tags and stashes** side by side; fetch, pull (merge, rebase or fast-forward only)
-  and push from the header's sync button, with background fetching.
+  and push from the floating sync bar in the bottom-right corner, with background fetching.
 - **GitHub** (via `gh`) — pull requests (create, review, merge, check out, comment, diff,
   checks), issues, Actions (runs, jobs, logs, re-run, cancel, dispatch, enable/disable
   workflows), releases (assets), deployments, packages, and repository settings (star, fork,

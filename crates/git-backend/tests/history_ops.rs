@@ -166,3 +166,26 @@ fn sign_off_default_and_custom() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn commit_metadata() {
+    let (loc, dir) = repo("meta");
+    commit(&loc, "a", "1\n2\n", "first");
+    loc.write_file("a", b"1\nchanged\n3\n").unwrap();
+    loc.write_file("b", b"x\n").unwrap();
+    git_backend::stage_all(&loc).unwrap();
+    git_backend::commit(
+        &loc,
+        "second\n\nwith a body",
+        false,
+        &git_backend::SignOff::None,
+    )
+    .unwrap();
+    let m = git_backend::commit_meta(&loc, "HEAD").unwrap();
+    assert_eq!(m.subject, "second");
+    assert_eq!(m.body, "with a body");
+    assert_eq!(m.author, "T");
+    assert_eq!(m.parents.len(), 1);
+    assert_eq!((m.files_changed, m.insertions, m.deletions), (2, 3, 1));
+    std::fs::remove_dir_all(dir).unwrap();
+}

@@ -45,7 +45,7 @@ pub struct Code {
     tree: Rc<FileTree>,
     tree_mode: adw::ToggleGroup,
     flat_toggle: gtk::ToggleButton,
-    tree_title: gtk::Label,
+    details: gtk::Box,
     file_title: gtk::Label,
     mode: adw::ToggleGroup,
     discard_btn: gtk::Button,
@@ -118,6 +118,17 @@ fn scrolled(w: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
         .build()
 }
 
+/// `#rrggbb` for Pango markup.
+fn hex(c: gdk::RGBA) -> String {
+    let to = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        to(c.red()),
+        to(c.green()),
+        to(c.blue())
+    )
+}
+
 fn basename(p: &str) -> &str {
     p.rsplit('/').next().unwrap_or(p)
 }
@@ -156,8 +167,11 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         .hexpand(true)
         .build();
     // Adwaita's `.toolbar` gives in-pane bars uniform 6px padding and spacing.
-    let search_bar = util::hbox(6);
+    let search_bar = util::vbox(6);
     search_bar.add_css_class("toolbar");
+    if let Some(branch) = ctx.branch_button.borrow_mut().take() {
+        search_bar.append(&branch);
+    }
     search_bar.append(&search);
     let banner = adw::Banner::builder().button_label("Abort").build();
     let timeline = gtk::ListBox::builder()
@@ -226,13 +240,16 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
             .build(),
     );
     tree_mode.set_active_name(Some("changes"));
-    let tree_title = gtk::Label::builder()
-        .xalign(0.0)
-        .ellipsize(gtk::pango::EllipsizeMode::End)
-        .css_classes(["caption", "dim-label"])
-        .margin_start(12)
-        .margin_end(12)
-        .margin_bottom(6)
+    let details = util::vbox(10);
+    details.set_margin_top(12);
+    details.set_margin_bottom(12);
+    details.set_margin_start(12);
+    details.set_margin_end(12);
+    let details_scroller = gtk::ScrolledWindow::builder()
+        .child(&details)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_height(true)
+        .max_content_height(380)
         .build();
     let tree = FileTree::new();
     let mid = util::vbox(0);
@@ -246,8 +263,9 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         .active(settings::get().flat_file_list)
         .build();
     mode_box.append(&flat_toggle);
+    mid.append(&details_scroller);
+    mid.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     mid.append(&mode_box);
-    mid.append(&tree_title);
     mid.append(&tree.widget);
     mid.set_width_request(180);
 
@@ -354,7 +372,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         tree,
         tree_mode,
         flat_toggle,
-        tree_title,
+        details,
         file_title,
         mode,
         discard_btn,
@@ -596,39 +614,12 @@ impl Code {
         );
     }
 
-    fn header_row(
-        self: &Rc<Self>,
-        title: &str,
-        menu: Option<Vec<(&str, Callback)>>,
-    ) -> gtk::ListBoxRow {
-        let b = util::hbox(6);
-        b.set_margin_top(12);
-        b.set_margin_start(6);
-        b.append(
-            &gtk::Label::builder()
-                .label(title)
-                .xalign(0.0)
-                .hexpand(true)
-                .css_classes(["heading", "dim-label"])
-                .build(),
-        );
-        if let Some(items) = menu {
-            b.append(&util::menu_button(items));
-        }
-        gtk::ListBoxRow::builder()
-            .child(&b)
-            .selectable(false)
-            .activatable(false)
-            .build()
-    }
-
     fn rebuild_timeline(self: &Rc<Self>) {
         self.suppress.set(true);
         util::clear_rows(&self.timeline);
         let changes = self.changes_now();
         let n = changes.len();
 
-        self.timeline.append(&self.header_row("Uncommitted", None));
         let wt = util::hbox(12);
         wt.set_margin_top(12);
         wt.set_margin_bottom(12);
@@ -657,7 +648,10 @@ impl Code {
                 .build(),
         );
         wt.append(&texts);
-        let wt_row = gtk::ListBoxRow::builder().child(&wt).build();
+        let wt_row = gtk::ListBoxRow::builder()
+            .child(&wt)
+            .tooltip_text("Uncommitted changes")
+            .build();
         wt_row.set_widget_name("worktree");
         {
             let w = Rc::downgrade(self);
@@ -669,24 +663,11 @@ impl Code {
 
         let unpushed = self.unpushed.borrow().clone();
         let commits = self.commits.borrow().clone();
-        let mut in_unpushed = false;
-        let mut in_pushed = false;
-        let n_unpushed = commits.iter().filter(|c| unpushed.contains(&c.oid)).count();
         let selected = self.sel.borrow().clone();
         let mut select_row: Option<gtk::ListBoxRow> =
             (selected == Sel::Worktree).then(|| wt_row.clone());
         for c in &commits {
             let is_unpushed = unpushed.contains(&c.oid);
-            if is_unpushed && !in_unpushed {
-                in_unpushed = true;
-                let menu = self.unpushed_menu();
-                self.timeline
-                    .append(&self.header_row(&format!("Not Pushed ({n_unpushed})"), Some(menu)));
-            }
-            if !is_unpushed && !in_pushed {
-                in_pushed = true;
-                self.timeline.append(&self.header_row("History", None));
-            }
             let row = self.commit_row(c, is_unpushed);
             if selected == Sel::Commit(c.oid.clone()) {
                 select_row = Some(row.clone());
@@ -754,7 +735,11 @@ impl Code {
         b.append(&texts);
         let row = gtk::ListBoxRow::builder()
             .child(&b)
-            .tooltip_text(&c.subject)
+            .tooltip_text(format!(
+                "{} — {}",
+                if unpushed { "Not pushed yet" } else { "Pushed" },
+                c.subject
+            ))
             .build();
         row.set_widget_name(&c.oid);
         let w = Rc::downgrade(self);
@@ -788,7 +773,250 @@ impl Code {
         } else if !is_wt {
             self.tree_mode.set_active_name(Some("changes"));
         }
+        self.show_details();
         self.load_tree();
+    }
+
+    // ------------------------------------------------------------------ details panel
+
+    fn show_details(self: &Rc<Self>) {
+        let sel = self.sel.borrow().clone();
+        match sel {
+            Sel::Worktree => {
+                util::clear_box(&self.details);
+                let n = self.changes.borrow().len();
+                self.details.append(
+                    &gtk::Label::builder()
+                        .label("Uncommitted Changes")
+                        .xalign(0.0)
+                        .css_classes(["title-4"])
+                        .build(),
+                );
+                let state = match self.state() {
+                    RepoState::Clean => String::new(),
+                    RepoState::Merging => " · merge in progress".into(),
+                    RepoState::Rebasing => " · rebase in progress".into(),
+                    RepoState::CherryPicking => " · cherry-pick in progress".into(),
+                    RepoState::Reverting => " · revert in progress".into(),
+                };
+                self.details.append(
+                    &gtk::Label::builder()
+                        .label(format!(
+                            "{} on {}{state}",
+                            if n == 0 {
+                                "No changed files".to_owned()
+                            } else {
+                                format!("{n} changed file{}", if n == 1 { "" } else { "s" })
+                            },
+                            self.ctx.branch()
+                        ))
+                        .xalign(0.0)
+                        .wrap(true)
+                        .css_classes(["dim-label"])
+                        .build(),
+                );
+            }
+            Sel::Commit(oid) => {
+                let w = Rc::downgrade(self);
+                self.ctx.load(
+                    move |l| git_backend::commit_meta(l, &oid),
+                    move |r| {
+                        let Some(v) = w.upgrade() else { return };
+                        match r {
+                            Ok(m) if v.sel_oid().as_deref() == Some(m.oid.as_str()) => {
+                                v.fill_commit_details(&m)
+                            }
+                            Ok(_) => {}
+                            Err(e) => v.ctx.toast(&e.to_string()),
+                        }
+                    },
+                );
+            }
+        }
+    }
+
+    fn fill_commit_details(self: &Rc<Self>, m: &git_backend::CommitMeta) {
+        let d = &self.details;
+        util::clear_box(d);
+        d.append(
+            &gtk::Label::builder()
+                .label(&m.subject)
+                .xalign(0.0)
+                .wrap(true)
+                .wrap_mode(gtk::pango::WrapMode::WordChar)
+                .selectable(true)
+                .css_classes(["title-4"])
+                .build(),
+        );
+        // Author
+        let who = util::hbox(10);
+        let avatar = adw::Avatar::new(36, Some(&m.author), true);
+        avatar.set_valign(gtk::Align::Start);
+        who.append(&avatar);
+        let lines = util::vbox(2);
+        lines.append(
+            &gtk::Label::builder()
+                .use_markup(true)
+                .label(format!(
+                    "<b>{}</b>  <span alpha=\"60%\">{}</span>",
+                    glib::markup_escape_text(&m.author),
+                    glib::markup_escape_text(&m.author_email)
+                ))
+                .xalign(0.0)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .selectable(true)
+                .build(),
+        );
+        lines.append(
+            &gtk::Label::builder()
+                .label(format!(
+                    "{} · {}",
+                    util::absolute_time(m.author_time),
+                    util::relative_time(m.author_time)
+                ))
+                .xalign(0.0)
+                .css_classes(["caption", "dim-label"])
+                .build(),
+        );
+        if m.committer != m.author || (m.committer_time - m.author_time).abs() > 60 {
+            lines.append(
+                &gtk::Label::builder()
+                    .label(format!(
+                        "Committed by {} · {}",
+                        m.committer,
+                        util::relative_time(m.committer_time)
+                    ))
+                    .xalign(0.0)
+                    .ellipsize(gtk::pango::EllipsizeMode::End)
+                    .css_classes(["caption", "dim-label"])
+                    .build(),
+            );
+        }
+        who.append(&lines);
+        d.append(&who);
+
+        if !m.refs.is_empty() {
+            let refs = adw::WrapBox::builder()
+                .child_spacing(6)
+                .line_spacing(6)
+                .build();
+            for r in &m.refs {
+                let (text, class) = if let Some(t) = r.strip_prefix("tag: ") {
+                    (t.to_owned(), "warning")
+                } else if let Some(h) = r.strip_prefix("HEAD -> ") {
+                    (h.to_owned(), "accent")
+                } else {
+                    (r.clone(), "success")
+                };
+                refs.append(&util::pill(&text, class));
+            }
+            d.append(&refs);
+        }
+
+        // Facts: hash, parents, change totals.
+        let grid = gtk::Grid::builder()
+            .column_spacing(12)
+            .row_spacing(6)
+            .build();
+        let key = |t: &str| {
+            gtk::Label::builder()
+                .label(t)
+                .xalign(0.0)
+                .css_classes(["caption-heading", "dim-label"])
+                .build()
+        };
+        let hash = util::hbox(4);
+        hash.append(
+            &gtk::Label::builder()
+                .label(&m.oid[..m.oid.len().min(12)])
+                .tooltip_text(&m.oid)
+                .selectable(true)
+                .css_classes(["mono"])
+                .build(),
+        );
+        let copy = util::icon_button("edit-copy-symbolic", "Copy Full Hash");
+        {
+            let (ctx, oid) = (self.ctx.clone(), m.oid.clone());
+            copy.connect_clicked(move |b| {
+                util::copy_text(b, &oid);
+                ctx.toast("Copied commit hash");
+            });
+        }
+        hash.append(&copy);
+        grid.attach(&key("Commit"), 0, 0, 1, 1);
+        grid.attach(&hash, 1, 0, 1, 1);
+        let mut row = 1;
+        if !m.parents.is_empty() {
+            let parents = util::hbox(6);
+            for p in &m.parents {
+                let b = gtk::Button::builder()
+                    .label(&p[..p.len().min(7)])
+                    .tooltip_text("Show This Commit")
+                    .css_classes(["flat", "mono", "hash-link"])
+                    .build();
+                let (w, oid) = (Rc::downgrade(self), p.clone());
+                b.connect_clicked(move |_| {
+                    if let Some(v) = w.upgrade() {
+                        v.select_commit(&oid);
+                    }
+                });
+                parents.append(&b);
+            }
+            grid.attach(
+                &key(if m.parents.len() > 1 {
+                    "Parents"
+                } else {
+                    "Parent"
+                }),
+                0,
+                row,
+                1,
+                1,
+            );
+            grid.attach(&parents, 1, row, 1, 1);
+            row += 1;
+        }
+        let stats = gtk::Label::builder()
+            .use_markup(true)
+            .label(format!(
+                "{} file{} · <span foreground=\"{}\">+{}</span> <span foreground=\"{}\">−{}</span>",
+                m.files_changed,
+                if m.files_changed == 1 { "" } else { "s" },
+                hex(crate::diff::theme_color("success")),
+                m.insertions,
+                hex(crate::diff::theme_color("error")),
+                m.deletions
+            ))
+            .xalign(0.0)
+            .build();
+        grid.attach(&key("Changes"), 0, row, 1, 1);
+        grid.attach(&stats, 1, row, 1, 1);
+        d.append(&grid);
+
+        // The message body last: it is the variable-length part. Commit messages are
+        // hard-wrapped plain text with Markdown-ish lists, which the Markdown renderer reflows.
+        if !m.body.is_empty() {
+            d.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+            // `<…>` (e.g. "Name <email>") is text in a commit message, not HTML.
+            d.append(&crate::markdown::render(&m.body.replace('<', "\\<")));
+        }
+    }
+
+    /// Select a commit in the timeline, if it is loaded.
+    fn select_commit(self: &Rc<Self>, oid: &str) {
+        let mut c = self.timeline.first_child();
+        while let Some(w) = c {
+            if w.widget_name() == oid
+                && let Ok(row) = w.clone().downcast::<gtk::ListBoxRow>()
+            {
+                self.timeline.select_row(Some(&row));
+                row.grab_focus();
+                return;
+            }
+            c = w.next_sibling();
+        }
+        self.ctx
+            .toast("That commit is further back in history; scroll down to load more");
     }
 
     fn load_tree(self: &Rc<Self>) {
@@ -799,8 +1027,6 @@ impl Code {
         match sel {
             Sel::Worktree => {
                 let changes = self.changes.borrow().clone();
-                self.tree_title
-                    .set_label(&format!("Working tree · {}", self.ctx.branch()));
                 let files: Vec<(String, Option<char>)> = changes
                     .iter()
                     .map(|f| (f.path.clone(), Some(change_letter(f))))
@@ -831,8 +1057,6 @@ impl Code {
                 });
             }
             Sel::Commit(oid) => {
-                let short = oid[..oid.len().min(8)].to_owned();
-                self.tree_title.set_label(&format!("Commit {short}"));
                 self.ctx.load(
                     move |l| {
                         let files = git_backend::commit_files(l, &oid)?;
@@ -1650,41 +1874,6 @@ impl Code {
         items
     }
 
-    fn unpushed_menu(self: &Rc<Self>) -> Vec<(&'static str, Callback)> {
-        let w = Rc::downgrade(self);
-        let ctx = self.ctx.clone();
-        vec![
-            ("Push", {
-                let ctx = ctx.clone();
-                Rc::new(move || {
-                    let c = ctx.clone();
-                    ctx.git(
-                        "Push",
-                        |l| git_backend::push(l, false),
-                        move |_| c.toast("Pushed"),
-                    )
-                })
-            }),
-            ("Squash All into One Commit…", {
-                let w = w.clone();
-                Rc::new(move || {
-                    if let Some(v) = w.upgrade() {
-                        v.squash_unpushed();
-                    }
-                })
-            }),
-            ("Undo Last Commit", {
-                let ctx = ctx.clone();
-                Rc::new(move || {
-                    let c = ctx.clone();
-                    ctx.git("Undo Commit", git_backend::undo_last_commit, move |_| {
-                        c.toast("Last commit undone; its changes are back in Uncommitted")
-                    })
-                })
-            }),
-        ]
-    }
-
     fn squash_unpushed(self: &Rc<Self>) {
         let unpushed = self.unpushed.borrow().clone();
         let Some(oldest) = self
@@ -1763,6 +1952,28 @@ impl Code {
             items.push(("Open on GitHub".into(), mk(open_on_github)));
         }
         items.push((String::new(), Rc::new(|| {})));
+        if unpushed {
+            items.push(("Push All Unpushed Commits".into(), {
+                let ctx = ctx.clone();
+                Rc::new(move || {
+                    let c = ctx.clone();
+                    ctx.git(
+                        "Push",
+                        |l| git_backend::push(l, false),
+                        move |_| c.toast("Pushed"),
+                    )
+                })
+            }));
+            items.push(("Squash All Unpushed into One…".into(), {
+                let w = Rc::downgrade(self);
+                Rc::new(move || {
+                    if let Some(v) = w.upgrade() {
+                        v.squash_unpushed();
+                    }
+                })
+            }));
+            items.push((String::new(), Rc::new(|| {})));
+        }
         items.push(("Check Out This Commit".into(), mk(checkout)));
         items.push(("New Branch from Here…".into(), {
             let (ctx, oid) = (ctx.clone(), oid.clone());

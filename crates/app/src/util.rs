@@ -80,6 +80,13 @@ pub fn relative_time(unix: i64) -> String {
     format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" })
 }
 
+pub fn absolute_time(unix: i64) -> String {
+    glib::DateTime::from_unix_local(unix)
+        .and_then(|d| d.format("%Y-%m-%d %H:%M"))
+        .map(|s| s.to_string())
+        .unwrap_or_default()
+}
+
 /// Relative time for an ISO-8601 timestamp from the GitHub API.
 pub fn iso_relative(s: &str) -> String {
     glib::DateTime::from_iso8601(s, Some(&glib::TimeZone::utc()))
