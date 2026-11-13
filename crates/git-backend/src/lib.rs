@@ -159,10 +159,13 @@ pub fn status(loc: &Location) -> Result<Status> {
 
 pub fn repo_state(loc: &Location) -> RepoState {
     let has = |r: &str| loc.git_ok(&["rev-parse", "-q", "--verify", r]);
-    if has("MERGE_HEAD") {
-        RepoState::Merging
-    } else if has("REBASE_HEAD") {
+    // `REBASE_HEAD` is often left behind after a rebase finishes, so look for the state
+    // directories `git rebase` itself checks (`rebase-apply` without `applying` is `git am`).
+    // Checked first: a conflicting merge inside `rebase -r` also sets MERGE_HEAD.
+    if rebase_in_progress(loc) {
         RepoState::Rebasing
+    } else if has("MERGE_HEAD") {
+        RepoState::Merging
     } else if has("CHERRY_PICK_HEAD") {
         RepoState::CherryPicking
     } else if has("REVERT_HEAD") {
@@ -170,6 +173,14 @@ pub fn repo_state(loc: &Location) -> RepoState {
     } else {
         RepoState::Clean
     }
+}
+
+fn rebase_in_progress(loc: &Location) -> bool {
+    loc.shell(
+        r#"m=$(git rev-parse --git-path rebase-merge) && a=$(git rev-parse --git-path rebase-apply) && { test -d "$m" || { test -d "$a" && ! test -f "$a/applying"; }; }"#,
+        None,
+    )
+    .is_ok()
 }
 
 /// Check that `loc` is a work tree and return its top-level path.

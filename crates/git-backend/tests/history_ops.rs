@@ -103,3 +103,25 @@ fn commit_only_included_files() {
     assert!(st.files[0].untracked());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn rebase_state_ignores_stale_rebase_head() {
+    use git_backend::RepoState;
+    let (loc, dir) = repo("rebase-state");
+    commit(&loc, "f", "base\n", "base");
+    loc.git(&["checkout", "-q", "-b", "side"]).unwrap();
+    commit(&loc, "f", "side\n", "side");
+    loc.git(&["checkout", "-q", "main"]).unwrap();
+    commit(&loc, "f", "main\n", "main");
+    loc.git(&["checkout", "-q", "side"]).unwrap();
+    assert!(loc.git(&["rebase", "main"]).is_err());
+    assert_eq!(git_backend::repo_state(&loc), RepoState::Rebasing);
+    git_backend::abort_op(&loc, RepoState::Rebasing).unwrap();
+    assert_eq!(git_backend::repo_state(&loc), RepoState::Clean);
+    // Git can leave REBASE_HEAD behind once a rebase is over; that alone is not a rebase.
+    let head = loc.git(&["rev-parse", "HEAD"]).unwrap();
+    loc.git(&["update-ref", "REBASE_HEAD", head.trim()])
+        .unwrap();
+    assert_eq!(git_backend::repo_state(&loc), RepoState::Clean);
+    std::fs::remove_dir_all(dir).unwrap();
+}
