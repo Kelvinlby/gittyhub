@@ -298,7 +298,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     let inner = gtk::Paned::builder()
         .start_child(&mid)
         .end_child(&right)
-        .position(280)
+        .position(420)
         .shrink_start_child(false)
         .resize_start_child(false)
         .build();
