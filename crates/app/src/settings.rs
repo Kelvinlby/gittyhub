@@ -25,7 +25,10 @@ pub struct Settings {
     /// Minutes between background fetches; 0 disables.
     pub auto_fetch_minutes: u32,
     pub recent: Vec<Location>,
+    /// Tabs of the first window (kept for older settings files).
     pub open_tabs: Vec<Location>,
+    /// Every window's tabs, restored on the next launch.
+    pub open_windows: Vec<Vec<Location>>,
     pub clone_dir: String,
     /// Show the Code view's files as a flat list instead of a folder tree.
     pub flat_file_list: bool,
@@ -57,6 +60,7 @@ impl Default for Settings {
             auto_fetch_minutes: 10,
             recent: Vec::new(),
             open_tabs: Vec::new(),
+            open_windows: Vec::new(),
             clone_dir: glib::home_dir().join("Code").to_string_lossy().into_owned(),
             flat_file_list: false,
             ui_zoom: 1.0,

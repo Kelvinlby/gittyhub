@@ -22,13 +22,30 @@ fn main() -> glib::ExitCode {
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::HANDLES_OPEN)
         .build();
-    app.connect_startup(startup);
-    app.connect_activate(|app| {
-        window::Window::create(app, &[]).present();
+    app.add_main_option(
+        "new-window",
+        glib::Char::from(b'n'),
+        glib::OptionFlags::NONE,
+        glib::OptionArg::None,
+        "Open a new window",
+        None,
+    );
+    app.connect_handle_local_options(|app, opts| {
+        if opts.contains("new-window") {
+            if app.register(gio::Cancellable::NONE).is_ok() && app.is_remote() {
+                // Already running: ask that instance for a window and exit.
+                app.activate_action("new-window", None);
+                return std::ops::ControlFlow::Break(glib::ExitCode::SUCCESS);
+            }
+            window::set_start_empty();
+        }
+        std::ops::ControlFlow::Continue(())
     });
+    app.connect_startup(startup);
+    app.connect_activate(window::activate);
     app.connect_open(|app, files, _| {
         let paths: Vec<_> = files.iter().filter_map(|f| f.path()).collect();
-        window::Window::create(app, &paths).present();
+        window::open_paths(app, &paths);
     });
     app.run()
 }
@@ -48,15 +65,14 @@ fn startup(app: &adw::Application) {
     gtk::Window::set_default_icon_name(APP_ID);
 
     let quit = gio::SimpleAction::new("quit", None);
-    quit.connect_activate(glib::clone!(
+    quit.connect_activate(|_, _| window::quit_all());
+    let new_window = gio::SimpleAction::new("new-window", None);
+    new_window.connect_activate(glib::clone!(
         #[weak]
         app,
-        move |_, _| {
-            for w in app.windows() {
-                w.close();
-            }
-        }
+        move |_, _| window::new_window(&app)
     ));
+    app.add_action(&new_window);
     let about = gio::SimpleAction::new("about", None);
     about.connect_activate(glib::clone!(
         #[weak]
@@ -97,6 +113,7 @@ fn startup(app: &adw::Application) {
     app.add_action(&preferences);
 
     app.set_accels_for_action("app.quit", &["<Control>q"]);
+    app.set_accels_for_action("app.new-window", &["<Control>n"]);
     app.set_accels_for_action(
         "app.zoom-in",
         &["<Control>plus", "<Control>equal", "<Control>KP_Add"],

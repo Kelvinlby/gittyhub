@@ -15,13 +15,106 @@ type WinAction = Box<dyn Fn(&Rc<Window>)>;
 
 thread_local! {
     static WINDOWS: RefCell<Vec<Rc<Window>>> = const { RefCell::new(Vec::new()) };
+    /// Every open tab in every window. Tabs can be dragged between windows, so the mapping
+    /// from tab to repository lives here rather than in one window.
+    static PAGES: RefCell<Vec<(adw::TabPage, Rc<RepoPage>)>> = const { RefCell::new(Vec::new()) };
+    /// Quitting the app: every window's tabs were already saved; closing them must not re-save.
+    static QUITTING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Set by `--new-window` on the first launch: open an empty window, don't restore tabs.
+    static START_EMPTY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn page_for(tp: &adw::TabPage) -> Option<Rc<RepoPage>> {
+    PAGES.with(|p| {
+        p.borrow()
+            .iter()
+            .find(|(t, _)| t == tp)
+            .map(|(_, r)| r.clone())
+    })
+}
+
+pub fn set_start_empty() {
+    START_EMPTY.with(|s| s.set(true));
+}
+
+/// Locations of every tab, window by window, for the next launch.
+fn save_session() {
+    let windows: Vec<Vec<Location>> = WINDOWS.with(|ws| {
+        ws.borrow()
+            .iter()
+            .map(|w| w.locations())
+            .filter(|l| !l.is_empty())
+            .collect()
+    });
+    settings::update(|s| {
+        s.open_tabs = windows.first().cloned().unwrap_or_default();
+        s.open_windows = windows;
+    });
+}
+
+/// Quit: remember every window's tabs, then close them all.
+pub fn quit_all() {
+    save_session();
+    QUITTING.with(|q| q.set(true));
+    let windows: Vec<adw::ApplicationWindow> =
+        WINDOWS.with(|ws| ws.borrow().iter().map(|w| w.win.clone()).collect());
+    for w in windows {
+        w.close();
+    }
+}
+
+/// App activation: bring an existing window forward, or restore the last session.
+pub fn activate(app: &adw::Application) {
+    if let Some(w) = WINDOWS.with(|ws| ws.borrow().first().cloned()) {
+        w.win.present();
+        return;
+    }
+    if START_EMPTY.with(|s| s.replace(false)) {
+        Window::build(app).win.present();
+        return;
+    }
+    let s = settings::get();
+    let mut sessions = s.open_windows.clone();
+    if sessions.is_empty() && !s.open_tabs.is_empty() {
+        sessions.push(s.open_tabs.clone());
+    }
+    if !s.restore_tabs || sessions.is_empty() {
+        Window::build(app).win.present();
+        return;
+    }
+    for locs in sessions {
+        let w = Window::build(app);
+        for loc in locs {
+            w.add_tab(loc);
+        }
+        w.win.present();
+    }
+}
+
+/// Open repositories given on the command line, in the existing window if there is one.
+pub fn open_paths(app: &adw::Application, paths: &[PathBuf]) {
+    let w = WINDOWS
+        .with(|ws| ws.borrow().first().cloned())
+        .unwrap_or_else(|| Window::build(app));
+    for p in paths {
+        w.open_location(Location::Local(p.clone()));
+    }
+    w.win.present();
+}
+
+/// A new, empty window (welcome screen).
+pub fn new_window(app: &adw::Application) {
+    Window::build(app).win.present();
 }
 
 pub struct Window {
     win: adw::ApplicationWindow,
     tab_view: adw::TabView,
     stack: gtk::Stack,
-    pages: RefCell<Vec<(adw::TabPage, Rc<RepoPage>)>>,
+    /// The tab whose context menu is open (for the tab menu's actions).
+    menu_page: RefCell<Option<adw::TabPage>>,
+    /// True while one of our tabs is being closed (as opposed to dragged away).
+    closing: std::cell::Cell<bool>,
     start_bin: adw::Bin,
     title_bin: adw::Bin,
     end_bin: adw::Bin,
@@ -36,7 +129,7 @@ pub struct Window {
 }
 
 impl Window {
-    pub fn create(app: &adw::Application, paths: &[PathBuf]) -> gtk::Window {
+    fn build(app: &adw::Application) -> Rc<Window> {
         let s = settings::get();
         let win = adw::ApplicationWindow::builder()
             .application(app)
@@ -49,6 +142,12 @@ impl Window {
             .build();
 
         let tab_view = adw::TabView::new();
+        let tab_menu = gio::Menu::new();
+        tab_menu.append(Some("Move to New Window"), Some("win.tab-to-new-window"));
+        let close_section = gio::Menu::new();
+        close_section.append(Some("Close Tab"), Some("win.tab-close"));
+        tab_menu.append_section(None, &close_section);
+        tab_view.set_menu_model(Some(&tab_menu));
         let tab_bar = adw::TabBar::builder()
             .view(&tab_view)
             .autohide(true)
@@ -57,6 +156,9 @@ impl Window {
         // Header bar
         let (open_button, picker_list, picker_search) = repo_picker();
         let main_menu = gio::Menu::new();
+        let window_section = gio::Menu::new();
+        window_section.append(Some("New Window"), Some("app.new-window"));
+        main_menu.append_section(None, &window_section);
         let section = gio::Menu::new();
         section.append(Some("Preferences"), Some("app.preferences"));
         section.append(Some("Keyboard Shortcuts"), Some("win.show-help-overlay"));
@@ -105,7 +207,8 @@ impl Window {
             win: win.clone(),
             tab_view,
             stack,
-            pages: RefCell::new(Vec::new()),
+            menu_page: RefCell::new(None),
+            closing: std::cell::Cell::new(false),
             start_bin,
             title_bin,
             end_bin,
@@ -122,19 +225,15 @@ impl Window {
         this.setup_signals();
         this.refresh_welcome();
         this.update_chrome();
+        this
+    }
 
-        if paths.is_empty() {
-            if s.restore_tabs {
-                for loc in s.open_tabs {
-                    this.add_tab(loc);
-                }
-            }
-        } else {
-            for p in paths {
-                this.open_location(Location::Local(p.clone()));
-            }
-        }
-        win.upcast()
+    /// This window's tab locations, in tab order.
+    fn locations(&self) -> Vec<Location> {
+        (0..self.tab_view.n_pages())
+            .filter_map(|i| page_for(&self.tab_view.nth_page(i)))
+            .map(|p| p.ctx.loc.clone())
+            .collect()
     }
 
     fn setup_actions(self: &Rc<Self>) {
@@ -178,6 +277,35 @@ impl Window {
             Box::new(|w| w.with_current(|p| p.force_push())),
         );
         add("show-help-overlay", Box::new(|w| shortcuts_dialog(&w.win)));
+        add(
+            "tab-to-new-window",
+            Box::new(|w| {
+                let page = w
+                    .menu_page
+                    .borrow_mut()
+                    .take()
+                    .or_else(|| w.tab_view.selected_page());
+                if let (Some(page), Some(app)) = (page, w.win.application()) {
+                    let app = app.downcast::<adw::Application>().expect("adw app");
+                    let other = Window::build(&app);
+                    w.tab_view.transfer_page(&page, &other.tab_view, 0);
+                    other.win.present();
+                }
+            }),
+        );
+        add(
+            "tab-close",
+            Box::new(|w| {
+                let page = w
+                    .menu_page
+                    .borrow_mut()
+                    .take()
+                    .or_else(|| w.tab_view.selected_page());
+                if let Some(page) = page {
+                    w.tab_view.close_page(&page);
+                }
+            }),
+        );
     }
 
     fn setup_signals(self: &Rc<Self>) {
@@ -195,21 +323,64 @@ impl Window {
             #[strong]
             weak,
             move |tv, page| {
+                PAGES.with(|p| p.borrow_mut().retain(|(t, _)| t != page));
                 if let Some(w) = weak.upgrade() {
-                    w.pages.borrow_mut().retain(|(p, _)| p != page);
+                    w.closing.set(true);
                     tv.close_page_finish(page, true);
-                    w.save_tabs();
+                    w.closing.set(false);
+                    save_session();
                     w.update_chrome();
+                } else {
+                    tv.close_page_finish(page, true);
                 }
                 glib::Propagation::Stop
             }
         ));
-        self.tab_view.connect_page_reordered(glib::clone!(
+        self.tab_view
+            .connect_page_reordered(|_, _, _| save_session());
+        // Tabs dragged in from another window.
+        self.tab_view.connect_page_attached(glib::clone!(
             #[strong]
             weak,
             move |_, _, _| {
                 if let Some(w) = weak.upgrade() {
-                    w.save_tabs();
+                    w.update_chrome();
+                }
+                save_session();
+            }
+        ));
+        // Tabs dragged out: a window left with no tabs that way closes, like other GNOME apps.
+        self.tab_view.connect_page_detached(glib::clone!(
+            #[strong]
+            weak,
+            move |tv, _, _| {
+                let Some(w) = weak.upgrade() else { return };
+                if !w.closing.get() && tv.n_pages() == 0 {
+                    let win = w.win.clone();
+                    glib::idle_add_local_once(move || win.close());
+                } else {
+                    w.update_chrome();
+                }
+            }
+        ));
+        // Dropping a tab outside any window opens it in a new one.
+        self.tab_view.connect_create_window(glib::clone!(
+            #[strong]
+            weak,
+            move |_| {
+                let w = weak.upgrade()?;
+                let app = w.win.application()?.downcast::<adw::Application>().ok()?;
+                let other = Window::build(&app);
+                other.win.present();
+                Some(other.tab_view.clone())
+            }
+        ));
+        self.tab_view.connect_setup_menu(glib::clone!(
+            #[strong]
+            weak,
+            move |_, page| {
+                if let Some(w) = weak.upgrade() {
+                    *w.menu_page.borrow_mut() = page.cloned();
                 }
             }
         ));
@@ -307,9 +478,21 @@ impl Window {
                     }
                 });
                 if let Some(w) = weak.upgrade() {
-                    w.save_tabs();
-                    w.pages.borrow_mut().clear();
+                    let quitting = QUITTING.with(|q| q.get());
+                    let last = WINDOWS.with(|ws| ws.borrow().len()) <= 1;
+                    // Closing the last window is quitting: remember its tabs. Closing one of
+                    // several just forgets that window's tabs.
+                    if last && !quitting {
+                        save_session();
+                    }
+                    for i in 0..w.tab_view.n_pages() {
+                        let tp = w.tab_view.nth_page(i);
+                        PAGES.with(|p| p.borrow_mut().retain(|(t, _)| *t != tp));
+                    }
                     WINDOWS.with(|ws| ws.borrow_mut().retain(|x| !Rc::ptr_eq(x, &w)));
+                    if !last && !quitting {
+                        save_session();
+                    }
                 }
                 glib::Propagation::Proceed
             }
@@ -317,33 +500,13 @@ impl Window {
     }
 
     fn current(&self) -> Option<Rc<RepoPage>> {
-        let sel = self.tab_view.selected_page()?;
-        self.pages
-            .borrow()
-            .iter()
-            .find(|(p, _)| *p == sel)
-            .map(|(_, r)| r.clone())
+        page_for(&self.tab_view.selected_page()?)
     }
 
     fn with_current(&self, f: impl FnOnce(&Rc<RepoPage>)) {
         if let Some(p) = self.current() {
             f(&p);
         }
-    }
-
-    fn save_tabs(&self) {
-        let n = self.tab_view.n_pages();
-        let pages = self.pages.borrow();
-        let locs: Vec<Location> = (0..n)
-            .filter_map(|i| {
-                let tp = self.tab_view.nth_page(i);
-                pages
-                    .iter()
-                    .find(|(p, _)| *p == tp)
-                    .map(|(_, r)| r.ctx.loc.clone())
-            })
-            .collect();
-        settings::update(|s| s.open_tabs = locs);
     }
 
     /// Swap header-bar widgets and the window title to match the selected tab.
@@ -354,9 +517,19 @@ impl Window {
             .set_visible_child_name(if has_tabs { "tabs" } else { "welcome" });
         match current {
             Some(p) => {
-                self.start_bin.set_child(Some(&p.header_start));
-                self.title_bin.set_child(Some(&p.header_title));
-                self.end_bin.set_child(Some(&p.header_end));
+                // The page may have come from another window, whose header still holds them.
+                for (bin, w) in [
+                    (&self.start_bin, p.header_start.upcast_ref::<gtk::Widget>()),
+                    (&self.title_bin, &p.header_title),
+                    (&self.end_bin, p.header_end.upcast_ref()),
+                ] {
+                    if let Some(old) = w.parent().and_downcast::<adw::Bin>()
+                        && &old != bin
+                    {
+                        old.set_child(gtk::Widget::NONE);
+                    }
+                    bin.set_child(Some(w));
+                }
                 self.win
                     .set_title(Some(&format!("{} — GittyHub", p.title())));
             }
@@ -417,8 +590,24 @@ impl Window {
     }
 
     fn add_tab(self: &Rc<Self>, loc: Location) {
-        if let Some((tp, _)) = self.pages.borrow().iter().find(|(_, r)| r.ctx.loc == loc) {
-            self.tab_view.set_selected_page(tp);
+        // Already open (in any window): show that tab.
+        let existing = PAGES.with(|p| {
+            p.borrow()
+                .iter()
+                .find(|(_, r)| r.ctx.loc == loc)
+                .map(|(t, _)| t.clone())
+        });
+        if let Some(tp) = existing {
+            let owner = WINDOWS.with(|ws| {
+                ws.borrow()
+                    .iter()
+                    .find(|w| (0..w.tab_view.n_pages()).any(|i| w.tab_view.nth_page(i) == tp))
+                    .cloned()
+            });
+            if let Some(w) = owner {
+                w.tab_view.set_selected_page(&tp);
+                w.win.present();
+            }
             return;
         }
         settings::add_recent(&loc);
@@ -429,34 +618,30 @@ impl Window {
         if loc.is_remote() {
             tp.set_icon(Some(&gio::ThemedIcon::new("gh-server-symbolic")));
         }
-        let weak = Rc::downgrade(self);
         let page_weak = page.weak();
         let tp_weak = tp.downgrade();
         page.connect_title_changed(move || {
-            if let (Some(w), Some(p), Some(tp)) =
-                (weak.upgrade(), page_weak.upgrade(), tp_weak.upgrade())
-            {
+            if let (Some(p), Some(tp)) = (page_weak.upgrade(), tp_weak.upgrade()) {
                 tp.set_tooltip(&glib::markup_escape_text(&p.subtitle()));
-                if w.tab_view.selected_page().as_ref() == Some(&tp) {
-                    w.win.set_title(Some(&format!("{} — GittyHub", p.title())));
+                // Whichever window the tab is in now.
+                if tp.is_selected()
+                    && let Some(win) = tp.child().root().and_downcast::<gtk::Window>()
+                {
+                    win.set_title(Some(&format!("{} — GittyHub", p.title())));
                 }
             }
         });
-        self.pages.borrow_mut().push((tp.clone(), page));
+        PAGES.with(|p| p.borrow_mut().push((tp.clone(), page)));
         self.tab_view.set_selected_page(&tp);
-        self.save_tabs();
+        save_session();
         self.update_chrome();
     }
 
     /// Fill the new-tab popover with recent repositories (open ones are marked).
     fn fill_picker(self: &Rc<Self>) {
         util::clear_rows(&self.picker_list);
-        let open: Vec<Location> = self
-            .pages
-            .borrow()
-            .iter()
-            .map(|(_, p)| p.ctx.loc.clone())
-            .collect();
+        let open: Vec<Location> =
+            PAGES.with(|p| p.borrow().iter().map(|(_, r)| r.ctx.loc.clone()).collect());
         for (i, loc) in settings::get().recent.iter().enumerate() {
             let row_box = util::hbox(10);
             row_box.set_margin_top(4);
@@ -740,6 +925,7 @@ fn shortcuts_dialog(win: &adw::ApplicationWindow) {
             "Repositories",
             &[
                 ("Ctrl+T", "New tab: recent repositories"),
+                ("Ctrl+N", "New window"),
                 ("Ctrl+O", "Open local repository"),
                 ("Ctrl+Shift+O", "Open repository over SSH"),
                 ("Ctrl+Shift+N", "Clone repository"),
