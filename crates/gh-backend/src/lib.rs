@@ -956,7 +956,71 @@ pub struct ReleaseDetail {
     pub assets: Vec<Asset>,
 }
 
+/// `gh release view <tag>` resolves the tag via `releases/tags/{tag}`, which never returns
+/// drafts (or releases whose tag doesn't exist yet), so fall back to scanning the REST list.
 pub fn release_view(repo: &str, tag: &str) -> Result<ReleaseDetail> {
+    release_view_cli(repo, tag).or_else(|e| release_view_api(repo, tag).map_err(|_| e))
+}
+
+fn release_view_api(repo: &str, tag: &str) -> Result<ReleaseDetail> {
+    #[derive(Deserialize)]
+    struct RestAsset {
+        name: String,
+        #[serde(default)]
+        size: u64,
+        #[serde(default)]
+        download_count: u64,
+        #[serde(default)]
+        browser_download_url: String,
+    }
+    #[derive(Deserialize)]
+    struct RestRelease {
+        tag_name: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        body: Option<String>,
+        #[serde(default)]
+        html_url: String,
+        #[serde(default)]
+        author: Option<Actor>,
+        #[serde(default)]
+        draft: bool,
+        #[serde(default)]
+        prerelease: bool,
+        #[serde(default)]
+        published_at: Option<String>,
+        #[serde(default)]
+        assets: Vec<RestAsset>,
+    }
+    let all: Vec<RestRelease> = api(&format!("repos/{repo}/releases?per_page=100"))?;
+    let r = all
+        .into_iter()
+        .find(|r| r.tag_name == tag)
+        .with_context(|| format!("release {tag} not found"))?;
+    Ok(ReleaseDetail {
+        tag_name: r.tag_name,
+        name: r.name.unwrap_or_default(),
+        body: r.body.unwrap_or_default(),
+        url: r.html_url,
+        author: r.author.unwrap_or_default(),
+        is_draft: r.draft,
+        is_prerelease: r.prerelease,
+        published_at: r.published_at,
+        assets: r
+            .assets
+            .into_iter()
+            .map(|a| Asset {
+                name: a.name,
+                size: a.size,
+                download_count: a.download_count,
+                url: a.browser_download_url,
+            })
+            .collect(),
+    })
+}
+
+fn release_view_cli(repo: &str, tag: &str) -> Result<ReleaseDetail> {
     run_json(&[
         "release",
         "view",
