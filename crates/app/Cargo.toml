@@ -1,0 +1,13 @@
+[package]
+name = "gittyhub"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+gpui.workspace = true
+gpui-platform.workspace = true
+gpui-component.workspace = true
+anyhow.workspace = true
+git-backend.workspace = true
+gh-backend.workspace = true
