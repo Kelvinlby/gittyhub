@@ -41,6 +41,7 @@ fn startup(app: &adw::Application) {
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
     settings::apply_appearance();
+    gtk::Window::set_default_icon_name(APP_ID);
 
     let quit = gio::SimpleAction::new("quit", None);
     quit.connect_activate(glib::clone!(
@@ -59,7 +60,7 @@ fn startup(app: &adw::Application) {
         move |_, _| {
             let dialog = adw::AboutDialog::builder()
                 .application_name("GittyHub")
-                .application_icon("gh-github-symbolic")
+                .application_icon(APP_ID)
                 .developer_name("GittyHub contributors")
                 .version(env!("CARGO_PKG_VERSION"))
                 .website("https://github.com/Kelvinlby/gittyhub")

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=GittyHub
+GenericName=Git Client
+Comment=Git client with deep GitHub integration
+Exec=gittyhub %F
+Icon=io.github.Kelvinlby.GittyHub
+Terminal=false
+Categories=Development;RevisionControl;GTK;
+Keywords=git;github;version;control;pull;request;
+StartupNotify=true
+DBusActivatable=false

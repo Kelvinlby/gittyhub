@@ -45,6 +45,13 @@ cargo run            # debug build, opens the app on the current directory's rep
 cargo build --release
 ```
 
+To install for your user (binary in `~/.cargo/bin`, plus a desktop entry and icon so GittyHub
+shows up in the app grid):
+
+```bash
+./install.sh
+```
+
 ## Project layout
 
 ```
