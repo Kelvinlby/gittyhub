@@ -438,32 +438,59 @@ pub fn clear_rows(list: &gtk::ListBox) {
 }
 
 /// Pop up a context menu at (x, y) on `parent`. An empty label starts a new section.
+///
+/// Built from plain menu-styled buttons rather than `GtkPopoverMenu`, whose built-in scroller
+/// could be sized a few pixels short and scroll even a four-item menu. Long menus scroll.
 pub fn popup_menu(parent: &impl IsA<gtk::Widget>, x: f64, y: f64, items: Vec<(String, Callback)>) {
-    let group = gio::SimpleActionGroup::new();
-    let menu = gio::Menu::new();
-    let mut section = gio::Menu::new();
-    for (i, (label, f)) in items.into_iter().enumerate() {
+    const SCROLL_AFTER: usize = 14;
+    let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let popover = gtk::Popover::builder()
+        .has_arrow(false)
+        .halign(gtk::Align::Start)
+        .css_classes(["menu", "context-menu"])
+        .build();
+    let mut count = 0;
+    let mut pending_separator = false;
+    for (label, f) in items {
         if label.is_empty() {
-            if section.n_items() > 0 {
-                menu.append_section(None, &section);
-            }
-            section = gio::Menu::new();
+            pending_separator = count > 0;
             continue;
         }
-        let name = format!("a{i}");
-        let action = gio::SimpleAction::new(&name, None);
-        action.connect_activate(move |_, _| f());
-        group.add_action(&action);
-        section.append(Some(&label), Some(&format!("ctx.{name}")));
+        if pending_separator {
+            list.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+            pending_separator = false;
+        }
+        let button = gtk::Button::builder()
+            .child(&gtk::Label::builder().label(&label).xalign(0.0).build())
+            .css_classes(["flat", "context-menu-item"])
+            .build();
+        let p = popover.downgrade();
+        button.connect_clicked(move |_| {
+            if let Some(p) = p.upgrade() {
+                p.popdown();
+            }
+            // Run after the menu has closed, so dialogs it opens get focus.
+            let f = f.clone();
+            glib::idle_add_local_once(move || f());
+        });
+        list.append(&button);
+        count += 1;
     }
-    if section.n_items() > 0 {
-        menu.append_section(None, &section);
+    if count == 0 {
+        return;
     }
-    let popover = gtk::PopoverMenu::from_model(Some(&menu));
-    popover.insert_action_group("ctx", Some(&group));
+    if count > SCROLL_AFTER {
+        let sw = gtk::ScrolledWindow::builder()
+            .child(&list)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .max_content_height(480)
+            .build();
+        popover.set_child(Some(&sw));
+    } else {
+        popover.set_child(Some(&list));
+    }
     popover.set_parent(parent);
-    popover.set_has_arrow(false);
-    popover.set_halign(gtk::Align::Start);
     popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
     popover.connect_closed(|p| {
         let p = p.clone();

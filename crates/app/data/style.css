@@ -104,3 +104,24 @@
 .comment-card {
   padding: 16px 18px;
 }
+
+/* Right-click menus: menu-sized rows with left-aligned labels. The popover inherits CSS from
+   the widget it is attached to, so reset the code font a diff view would pass down. */
+popover.context-menu,
+popover.context-menu label {
+  font-family: initial;
+  font-size: initial;
+}
+popover.context-menu .context-menu-item:focus-visible {
+  outline-color: transparent;
+  background-color: color-mix(in srgb, currentColor 10%, transparent);
+}
+popover.menu .context-menu-item {
+  min-height: 32px;
+  padding: 0 12px;
+  font-weight: normal;
+  border-radius: 6px;
+}
+popover.menu separator {
+  margin: 6px 0;
+}
