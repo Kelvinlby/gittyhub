@@ -530,7 +530,12 @@ fn shortcuts_dialog(win: &adw::ApplicationWindow) {
         ),
         (
             "Application",
-            &[("Ctrl+,", "Preferences"), ("Ctrl+Q", "Quit")][..],
+            &[
+                ("Ctrl+= / Ctrl+−", "Zoom in / out"),
+                ("Ctrl+0", "Reset zoom"),
+                ("Ctrl+,", "Preferences"),
+                ("Ctrl+Q", "Quit"),
+            ][..],
         ),
     ] {
         let group = adw::PreferencesGroup::builder().title(title).build();

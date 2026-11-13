@@ -25,6 +25,8 @@ pub struct Settings {
     pub recent: Vec<Location>,
     pub open_tabs: Vec<Location>,
     pub clone_dir: String,
+    /// Interface zoom (1.0 = 100%).
+    pub ui_zoom: f64,
     /// Font family for code; empty means the system monospace font.
     pub code_font_family: String,
     /// Code font size in points.
@@ -49,6 +51,7 @@ impl Default for Settings {
             recent: Vec::new(),
             open_tabs: Vec::new(),
             clone_dir: glib::home_dir().join("Code").to_string_lossy().into_owned(),
+            ui_zoom: 1.0,
             code_font_family: String::new(),
             code_font_size: 11.0,
             code_line_spacing: 1.2,
@@ -126,6 +129,7 @@ pub fn apply_appearance() {
     });
     apply_accent();
     apply_code_style();
+    apply_zoom();
     // Standalone accent shades depend on light/dark; re-apply when it flips.
     thread_local!(static HOOKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
     if !HOOKED.with(|h| h.replace(true)) {
@@ -180,8 +184,8 @@ pub fn register_code_view(view: &impl glib::object::IsA<gtk::TextView>) {
 }
 
 fn apply_spacing(view: &gtk::TextView, s: &Settings) {
-    // Extra space split above and below each line; points → pixels at 96 dpi.
-    let px = s.code_font_size * 96.0 / 72.0;
+    // Extra space split above and below each line; points → pixels at 96 dpi, zoomed.
+    let px = s.code_font_size * 96.0 / 72.0 * s.ui_zoom.clamp(ZOOM_MIN, ZOOM_MAX);
     let extra = ((s.code_line_spacing - 1.0).max(0.0) * px / 2.0).round() as i32;
     view.set_pixels_above_lines(extra);
     view.set_pixels_below_lines(extra);
@@ -221,4 +225,43 @@ pub fn apply_code_style() {
             }
         }
     });
+}
+
+pub const ZOOM_MIN: f64 = 0.5;
+pub const ZOOM_MAX: f64 = 2.5;
+
+thread_local! {
+    /// The desktop's text DPI before any zoom (GTK stores DPI × 1024).
+    static BASE_DPI: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
+}
+
+/// Scale the whole interface by adjusting this app's text DPI. libadwaita's breakpoints are
+/// measured in sp, so adaptive layouts follow the zoom too.
+pub fn apply_zoom() {
+    let Some(gs) = gtk::Settings::default() else {
+        return;
+    };
+    let base = BASE_DPI.with(|b| {
+        *b.get().get_or_insert_with(|| {
+            let d = gs.gtk_xft_dpi();
+            if d > 0 { d } else { 96 * 1024 }
+        })
+    });
+    let zoom = get().ui_zoom.clamp(ZOOM_MIN, ZOOM_MAX);
+    gs.set_gtk_xft_dpi((base as f64 * zoom).round() as i32);
+    // Line spacing is in pixels, so it must follow the zoom.
+    apply_code_style();
+}
+
+/// Change the zoom by `delta` (or reset with `None`), save and apply it.
+pub fn step_zoom(delta: Option<f64>) -> f64 {
+    update(|s| {
+        s.ui_zoom = match delta {
+            Some(d) => ((s.ui_zoom + d) * 10.0).round() / 10.0,
+            None => 1.0,
+        }
+        .clamp(ZOOM_MIN, ZOOM_MAX);
+    });
+    apply_zoom();
+    get().ui_zoom
 }

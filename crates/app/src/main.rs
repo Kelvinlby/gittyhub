@@ -81,11 +81,28 @@ fn startup(app: &adw::Application) {
         app,
         move |_, _| prefs::show(app.active_window().as_ref())
     ));
+    for (name, delta) in [
+        ("zoom-in", Some(0.1)),
+        ("zoom-out", Some(-0.1)),
+        ("zoom-reset", None),
+    ] {
+        let a = gio::SimpleAction::new(name, None);
+        a.connect_activate(move |_, _| {
+            settings::step_zoom(delta);
+        });
+        app.add_action(&a);
+    }
     app.add_action(&quit);
     app.add_action(&about);
     app.add_action(&preferences);
 
     app.set_accels_for_action("app.quit", &["<Control>q"]);
+    app.set_accels_for_action(
+        "app.zoom-in",
+        &["<Control>plus", "<Control>equal", "<Control>KP_Add"],
+    );
+    app.set_accels_for_action("app.zoom-out", &["<Control>minus", "<Control>KP_Subtract"]);
+    app.set_accels_for_action("app.zoom-reset", &["<Control>0", "<Control>KP_0"]);
     app.set_accels_for_action("app.preferences", &["<Control>comma"]);
     app.set_accels_for_action("win.open-local", &["<Control>o"]);
     app.set_accels_for_action("win.open-remote", &["<Control><Shift>o"]);

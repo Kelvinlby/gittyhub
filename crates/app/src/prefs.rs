@@ -32,6 +32,26 @@ pub fn show(parent: Option<&gtk::Window>) {
         settings::apply_appearance();
     });
     style_group.add(&scheme);
+    let zoom = adw::SpinRow::builder()
+        .title("Interface Zoom")
+        .subtitle("Percent; also Ctrl+= / Ctrl+− / Ctrl+0")
+        .adjustment(&gtk::Adjustment::new(
+            (s.ui_zoom * 100.0).round(),
+            settings::ZOOM_MIN * 100.0,
+            settings::ZOOM_MAX * 100.0,
+            10.0,
+            25.0,
+            0.0,
+        ))
+        .build();
+    zoom.connect_value_notify(|r| {
+        let v = r.value() / 100.0;
+        if (settings::get().ui_zoom - v).abs() > f64::EPSILON {
+            settings::update(|s| s.ui_zoom = v);
+            settings::apply_zoom();
+        }
+    });
+    style_group.add(&zoom);
     appearance.add(&style_group);
 
     let accent_group = adw::PreferencesGroup::builder()
@@ -351,7 +371,7 @@ fn code_group(s: &settings::Settings) -> adw::PreferencesGroup {
     crate::editor::set_text(
         &preview,
         "preview.rs",
-        "/// Preview of the code font.\nfn greet(name: &str) -> String {\n    format!(\"Hello, {name}!\") // 0O 1lI\n}\n",
+        "/// Preview of the code font.\nfn greet(name: &str) -> String {\n    format!(\"Hello, {name}!\") // 0O 1lI\n}",
     );
     let frame = gtk::Frame::builder().child(&preview).margin_top(12).build();
     frame.add_css_class("view");
