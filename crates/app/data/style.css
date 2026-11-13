@@ -44,7 +44,7 @@
 .pill-label.merged { color: var(--purple-3, var(--accent-color)); }
 
 .commit-box {
-  padding: 12px;
+  padding: 16px;
   border-top: 1px solid var(--border-color);
 }
 
@@ -81,4 +81,26 @@
 }
 .markdown .md-table label {
   border-bottom: 1px solid var(--border-color);
+}
+
+/* Roomier rows in sidebars, the file tree and boxed lists. */
+.navigation-sidebar > row {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+.file-tree > row {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.boxed-list > row {
+  min-height: 56px;
+}
+.diff-file-header {
+  padding: 10px 16px;
+}
+.diff-hunk-header {
+  padding: 4px 8px 4px 16px;
+}
+.comment-card {
+  padding: 16px 18px;
 }

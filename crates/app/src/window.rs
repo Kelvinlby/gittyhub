@@ -41,8 +41,8 @@ impl Window {
         let win = adw::ApplicationWindow::builder()
             .application(app)
             .title("GittyHub")
-            .default_width(s.window_width)
-            .default_height(s.window_height)
+            .default_width(initial_size(&s).0)
+            .default_height(initial_size(&s).1)
             .maximized(s.maximized)
             .width_request(360)
             .height_request(400)
@@ -293,6 +293,7 @@ impl Window {
                     if !s.maximized {
                         s.window_width = width;
                         s.window_height = height;
+                        s.window_size_saved = true;
                     }
                 });
                 if let Some(w) = weak.upgrade() {
@@ -544,6 +545,27 @@ impl Window {
 }
 
 /// The new-tab button and its popover: search, recent repositories, and ways to add one.
+/// The window size to open with: the saved one, or (first launch) a generous share of the
+/// monitor so everything fits without resizing.
+fn initial_size(s: &settings::Settings) -> (i32, i32) {
+    if s.window_size_saved {
+        return (s.window_width, s.window_height);
+    }
+    let monitor = gtk::gdk::Display::default()
+        .and_then(|d| d.monitors().item(0))
+        .and_downcast::<gtk::gdk::Monitor>();
+    match monitor {
+        Some(m) => {
+            let g = m.geometry();
+            (
+                ((g.width() as f64) * 0.75).round().max(1000.0) as i32,
+                ((g.height() as f64) * 0.85).round().max(720.0) as i32,
+            )
+        }
+        None => (1440, 900),
+    }
+}
+
 fn repo_picker() -> (gtk::MenuButton, gtk::ListBox, gtk::SearchEntry) {
     let search = gtk::SearchEntry::builder()
         .placeholder_text("Search recent repositories")

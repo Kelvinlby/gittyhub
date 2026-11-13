@@ -100,10 +100,10 @@ fn code_view(editable: bool, tags: Option<&gtk::TextTagTable>) -> gtk::TextView 
         .editable(editable)
         .cursor_visible(editable)
         .monospace(true)
-        .top_margin(8)
-        .bottom_margin(8)
-        .left_margin(8)
-        .right_margin(8)
+        .top_margin(14)
+        .bottom_margin(14)
+        .left_margin(12)
+        .right_margin(16)
         .build();
     settings::register_code_view(&view);
     view
@@ -152,10 +152,10 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     // ----- Timeline column
     let search = gtk::SearchEntry::builder()
         .placeholder_text("Search history")
-        .margin_top(6)
-        .margin_bottom(6)
-        .margin_start(6)
-        .margin_end(6)
+        .margin_top(10)
+        .margin_bottom(10)
+        .margin_start(10)
+        .margin_end(10)
         .build();
     let banner = adw::Banner::builder().button_label("Abort").build();
     let timeline = gtk::ListBox::builder()
@@ -165,7 +165,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         .label("Load More")
         .css_classes(["flat"])
         .visible(false)
-        .margin_bottom(6)
+        .margin_bottom(10)
         .build();
     let tl_box = util::vbox(0);
     tl_box.append(&timeline);
@@ -231,11 +231,11 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         .margin_end(12)
         .build();
     let tree = FileTree::new();
-    let mid = util::vbox(6);
+    let mid = util::vbox(8);
     let mode_box = util::hbox(0);
-    mode_box.set_margin_top(6);
-    mode_box.set_margin_start(6);
-    mode_box.set_margin_end(6);
+    mode_box.set_margin_top(10);
+    mode_box.set_margin_start(10);
+    mode_box.set_margin_end(10);
     tree_mode.set_hexpand(true);
     mode_box.set_spacing(6);
     mode_box.append(&tree_mode);
@@ -264,10 +264,10 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         .visible(false)
         .build();
     let bar = util::hbox(8);
-    bar.set_margin_top(6);
-    bar.set_margin_bottom(6);
-    bar.set_margin_start(12);
-    bar.set_margin_end(6);
+    bar.set_margin_top(10);
+    bar.set_margin_bottom(10);
+    bar.set_margin_start(16);
+    bar.set_margin_end(10);
     bar.append(&file_title);
     bar.append(&mode);
     bar.append(&discard_btn);
@@ -591,8 +591,8 @@ impl Code {
         menu: Option<Vec<(&str, Callback)>>,
     ) -> gtk::ListBoxRow {
         let b = util::hbox(6);
-        b.set_margin_top(10);
-        b.set_margin_start(6);
+        b.set_margin_top(18);
+        b.set_margin_start(10);
         b.append(
             &gtk::Label::builder()
                 .label(title)
@@ -619,8 +619,8 @@ impl Code {
 
         self.timeline.append(&self.header_row("Uncommitted", None));
         let wt = util::hbox(10);
-        wt.set_margin_top(6);
-        wt.set_margin_bottom(6);
+        wt.set_margin_top(10);
+        wt.set_margin_bottom(10);
         wt.append(&gtk::Image::from_icon_name("document-edit-symbolic"));
         let texts = util::vbox(2);
         texts.append(
@@ -688,8 +688,8 @@ impl Code {
 
     fn commit_row(self: &Rc<Self>, c: &Commit, unpushed: bool) -> gtk::ListBoxRow {
         let b = util::hbox(10);
-        b.set_margin_top(4);
-        b.set_margin_bottom(4);
+        b.set_margin_top(3);
+        b.set_margin_bottom(3);
         let icon = gtk::Image::from_icon_name(if unpushed {
             "go-up-symbolic"
         } else {
@@ -697,9 +697,9 @@ impl Code {
         });
         icon.add_css_class(if unpushed { "accent" } else { "dim-label" });
         icon.set_valign(gtk::Align::Start);
-        icon.set_margin_top(2);
+        icon.set_margin_top(3);
         b.append(&icon);
-        let texts = util::vbox(3);
+        let texts = util::vbox(4);
         texts.append(
             &gtk::Label::builder()
                 .label(&c.subject)
@@ -1064,10 +1064,10 @@ impl Code {
         } else if let Ok(text) = String::from_utf8(bytes) {
             if is_markdown(path) {
                 let md = markdown::render(&text);
-                md.set_margin_top(24);
-                md.set_margin_bottom(24);
-                md.set_margin_start(32);
-                md.set_margin_end(32);
+                md.set_margin_top(32);
+                md.set_margin_bottom(32);
+                md.set_margin_start(48);
+                md.set_margin_end(48);
                 self.preview.set_child(Some(&scrolled(&md)));
             } else {
                 let view = editor::view(false);

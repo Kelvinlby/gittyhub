@@ -237,7 +237,7 @@ impl FileTree {
             .model(&selection)
             .factory(&factory)
             .single_click_activate(true)
-            .css_classes(["navigation-sidebar"])
+            .css_classes(["navigation-sidebar", "file-tree"])
             .build();
         let widget = gtk::ScrolledWindow::builder()
             .child(&view)

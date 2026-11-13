@@ -33,6 +33,8 @@ pub struct Settings {
     pub code_font_size: f64,
     /// Line height as a multiple of the font size (1.0 = tight).
     pub code_line_spacing: f64,
+    /// True once the user's own window size has been saved; until then it is sized to the monitor.
+    pub window_size_saved: bool,
     pub window_width: i32,
     pub window_height: i32,
     pub maximized: bool,
@@ -54,7 +56,8 @@ impl Default for Settings {
             ui_zoom: 1.0,
             code_font_family: String::new(),
             code_font_size: 11.0,
-            code_line_spacing: 1.2,
+            code_line_spacing: 1.3,
+            window_size_saved: false,
             window_width: 1280,
             window_height: 820,
             maximized: false,
