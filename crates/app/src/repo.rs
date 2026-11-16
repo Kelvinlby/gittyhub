@@ -712,13 +712,13 @@ impl RepoPage {
         } else if b.behind > 0 {
             (
                 "gh-arrow-down-symbolic",
-                format!("Pull ↓{}", b.behind),
+                format!("Pull {}", b.behind),
                 "Pull new commits",
             )
         } else if b.ahead > 0 {
             (
                 "gh-arrow-up-symbolic",
-                format!("Push ↑{}", b.ahead),
+                format!("Push {}", b.ahead),
                 "Push local commits",
             )
         } else {
