@@ -240,3 +240,17 @@ fn clone_and_fetch_report_progress() {
     std::fs::remove_dir_all(dir).unwrap();
     std::fs::remove_dir_all(dest).unwrap();
 }
+
+#[test]
+fn init_defaults_to_main() {
+    let dir = std::env::temp_dir().join(format!("gittyhub-init-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let loc = Location::Local(dir.clone());
+    git_backend::init(&loc).unwrap();
+    let head = std::fs::read_to_string(dir.join(".git/HEAD")).unwrap();
+    // A user-set init.defaultBranch is honoured, so only assert main when none is set.
+    if git_backend::config_get(&loc.with_path("/"), "init.defaultBranch").is_none() {
+        assert_eq!(head.trim(), "ref: refs/heads/main");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

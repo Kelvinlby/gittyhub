@@ -1567,12 +1567,20 @@ pub fn clone(parent: &Location, url: &str, dest: &str) -> Result<()> {
     parent.with_path("/").git(&["clone", url, dest]).map(drop)
 }
 
+/// Create a repository at `loc`. The initial branch is `main` unless the user has set
+/// `init.defaultBranch` themselves, in which case git's own choice is kept.
 pub fn init(loc: &Location) -> Result<()> {
     let path = match loc {
         Location::Local(p) => p.to_string_lossy().into_owned(),
         Location::Ssh { path, .. } => path.clone(),
     };
-    loc.with_path("/").git(&["init", &path]).map(drop)
+    let root = loc.with_path("/");
+    if config_get(&root, "init.defaultBranch").is_some() {
+        root.git(&["init", &path]).map(drop)
+    } else {
+        root.git(&["init", "--initial-branch=main", &path])
+            .map(drop)
+    }
 }
 
 pub fn config_get(loc: &Location, key: &str) -> Option<String> {
