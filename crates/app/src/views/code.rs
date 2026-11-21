@@ -34,7 +34,7 @@ pub struct Code {
     ctx: Rc<Ctx>,
     root: adw::BreakpointBin,
     timeline: gtk::ListBox,
-    wt_list: gtk::ListBox,
+    wt_label: gtk::Label,
     search: gtk::SearchEntry,
     more: gtk::Button,
     banner: adw::Banner,
@@ -227,13 +227,17 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     composer.append(&commit_btn);
 
     // The uncommitted-changes row and the commit form share one card under the sync buttons.
-    let wt_list = gtk::ListBox::builder()
-        .css_classes(["navigation-sidebar", "commit-header"])
+    let wt_label = gtk::Label::builder()
+        .xalign(0.0)
+        .wrap(true)
+        .css_classes(["commit-header"])
+        .tooltip_text("Show Uncommitted Changes")
+        .cursor(&gdk::Cursor::from_name("pointer", None).expect("pointer cursor"))
         .build();
     let commit_card = util::vbox(0);
     commit_card.add_css_class("card");
     commit_card.add_css_class("commit-card");
-    commit_card.append(&wt_list);
+    commit_card.append(&wt_label);
     commit_card.append(&composer);
     commit_card.set_margin_start(6);
     commit_card.set_margin_end(6);
@@ -383,7 +387,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         ctx: ctx.clone(),
         root,
         timeline,
-        wt_list,
+        wt_label,
         search,
         more,
         banner,
@@ -464,7 +468,6 @@ impl Code {
                 if v.suppress.get() {
                     return;
                 }
-                v.wt_list.unselect_all();
                 let sel = Sel::Commit(row.widget_name().to_string());
                 if *v.sel.borrow() != sel {
                     *v.sel.borrow_mut() = sel;
@@ -474,18 +477,21 @@ impl Code {
         }
         {
             let w = w.clone();
-            self.wt_list.connect_row_selected(move |_, row| {
-                let (Some(v), Some(_)) = (w.upgrade(), row) else {
-                    return;
-                };
-                if v.suppress.get() {
-                    return;
-                }
+            let click = gtk::GestureClick::new();
+            click.connect_released(move |_, _, _, _| {
+                let Some(v) = w.upgrade() else { return };
                 v.timeline.unselect_all();
                 if *v.sel.borrow() != Sel::Worktree {
                     *v.sel.borrow_mut() = Sel::Worktree;
                     v.load_selection();
                 }
+            });
+            self.wt_label.add_controller(click);
+        }
+        {
+            let w = w.clone();
+            util::context_menu(&self.wt_label, move || {
+                w.upgrade().map(|v| v.worktree_menu()).unwrap_or_default()
             });
         }
         self.tree_mode
@@ -652,50 +658,16 @@ impl Code {
     fn rebuild_timeline(self: &Rc<Self>) {
         self.suppress.set(true);
         util::clear_rows(&self.timeline);
-        util::clear_rows(&self.wt_list);
-        let changes = self.changes_now();
-        let n = changes.len();
-
-        let wt = util::hbox(12);
-        wt.set_margin_top(12);
-        wt.set_margin_bottom(12);
-        wt.set_margin_start(4);
-        wt.set_margin_end(4);
-        let wt_icon = gtk::Image::from_icon_name("document-edit-symbolic");
-        wt_icon.set_valign(gtk::Align::Start);
-        wt_icon.set_margin_top(2);
-        wt.append(&wt_icon);
-        let texts = util::vbox(6);
-        texts.append(
-            &gtk::Label::builder()
-                .label(if n == 0 {
-                    "No local changes".to_owned()
-                } else {
-                    format!("{n} changed file{}", if n == 1 { "" } else { "s" })
-                })
-                .xalign(0.0)
-                .build(),
-        );
-        texts.append(
-            &gtk::Label::builder()
-                .label(format!("on {}", self.ctx.branch()))
-                .xalign(0.0)
-                .css_classes(["caption", "dim-label"])
-                .build(),
-        );
-        wt.append(&texts);
-        let wt_row = gtk::ListBoxRow::builder()
-            .child(&wt)
-            .tooltip_text("Uncommitted changes")
-            .build();
-        wt_row.set_widget_name("worktree");
-        {
-            let w = Rc::downgrade(self);
-            util::context_menu(&wt_row, move || {
-                w.upgrade().map(|v| v.worktree_menu()).unwrap_or_default()
-            });
-        }
-        self.wt_list.append(&wt_row);
+        let n = self.changes_now().len();
+        self.wt_label.set_label(&if n == 0 {
+            format!("No local changes on {}", self.ctx.branch())
+        } else {
+            format!(
+                "{n} changed file{} on {}",
+                if n == 1 { "" } else { "s" },
+                self.ctx.branch()
+            )
+        });
 
         let unpushed = self.unpushed.borrow().clone();
         let commits = self.commits.borrow().clone();
@@ -710,13 +682,9 @@ impl Code {
             self.timeline.append(&row);
         }
         match select_row {
-            Some(row) => {
-                self.wt_list.unselect_all();
-                self.timeline.select_row(Some(&row));
-            }
+            Some(row) => self.timeline.select_row(Some(&row)),
             None => {
                 self.timeline.unselect_all();
-                self.wt_list.select_row(Some(&wt_row));
                 *self.sel.borrow_mut() = Sel::Worktree;
             }
         }
