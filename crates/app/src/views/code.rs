@@ -38,7 +38,6 @@ pub struct Code {
     search: gtk::SearchEntry,
     more: gtk::Button,
     banner: adw::Banner,
-    composer: gtk::Box,
     summary: gtk::Entry,
     description: gtk::TextBuffer,
     amend: gtk::CheckButton,
@@ -391,7 +390,6 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         search,
         more,
         banner,
-        composer,
         summary,
         description,
         amend,
@@ -773,9 +771,6 @@ impl Code {
 
     fn load_selection(self: &Rc<Self>) {
         let is_wt = *self.sel.borrow() == Sel::Worktree;
-        self.composer.set_visible(
-            is_wt && (!self.changes.borrow().is_empty() || self.state() != RepoState::Clean),
-        );
         if is_wt && self.changes.borrow().is_empty() {
             self.tree_mode.set_active_name(Some("all"));
         } else if !is_wt {
@@ -1778,7 +1773,7 @@ impl Code {
     }
 
     fn do_commit(self: &Rc<Self>) {
-        if !self.commit_btn.is_sensitive() || !self.composer.is_visible() {
+        if !self.commit_btn.is_sensitive() {
             return;
         }
         let state = self.state();
