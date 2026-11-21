@@ -1,7 +1,7 @@
 //! One open repository: the content of a tab.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
@@ -243,6 +243,8 @@ pub struct RepoPage {
     pub header_end: gtk::Box,
     branch_content: adw::ButtonContent,
     branch_list: gtk::ListBox,
+    /// Switcher rows (by widget name) that are remote branches with no local copy yet.
+    remote_rows: RefCell<HashSet<String>>,
     sync: gtk::Button,
     sync_more: gtk::MenuButton,
     sync_content: adw::ButtonContent,
@@ -432,6 +434,7 @@ impl RepoPage {
             header_end,
             branch_content,
             branch_list,
+            remote_rows: RefCell::new(HashSet::new()),
             sync,
             sync_more,
             sync_content,
@@ -526,9 +529,11 @@ impl RepoPage {
                 popover.popdown();
                 if let Some(p) = weak.upgrade() {
                     let name = row.widget_name().to_string();
+                    // A remote-only branch gets a local tracking copy on the way.
+                    let remote = p.remote_rows.borrow().contains(&name);
                     p.ctx.git(
                         "Switch Branch",
-                        move |l| git_backend::checkout(l, &name, false),
+                        move |l| git_backend::checkout(l, &name, remote),
                         |_| {},
                     );
                 }
@@ -930,34 +935,72 @@ impl RepoPage {
         });
     }
 
-    fn load_branch_list(&self) {
-        let list = self.branch_list.clone();
+    fn load_branch_list(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
         self.ctx.load(git_backend::branches, move |r| {
+            let Some(p) = weak.upgrade() else { return };
+            let list = &p.branch_list;
             list.remove_all();
-            for b in r.unwrap_or_default().into_iter().filter(|b| !b.remote) {
+            let all = r.unwrap_or_default();
+            let (locals, remotes): (Vec<_>, Vec<_>) = all.into_iter().partition(|b| !b.remote);
+            // Remote branches show under their local name unless a local branch already has
+            // it; with several remotes, `origin` wins, then the most recently updated.
+            let mut taken: HashSet<String> = locals.iter().map(|b| b.name.clone()).collect();
+            let mut remote_only: Vec<_> = Vec::new();
+            let mut sorted = remotes;
+            sorted.sort_by_key(|b| !b.name.starts_with("origin/"));
+            for b in sorted {
+                let Some((_, short)) = b.name.split_once('/') else {
+                    continue;
+                };
+                if taken.insert(short.to_owned()) {
+                    remote_only.push(b);
+                }
+            }
+            remote_only.sort_by_key(|b| std::cmp::Reverse(b.time));
+            let mut remote_rows = p.remote_rows.borrow_mut();
+            remote_rows.clear();
+            for b in locals.iter().chain(&remote_only) {
+                let (label, remote) = match b.name.split_once('/') {
+                    Some((remote, short)) if b.remote => (short, Some(remote)),
+                    _ => (b.name.as_str(), None),
+                };
                 let row_box = util::hbox(8);
                 let icon = gtk::Image::from_icon_name(if b.is_head {
                     "object-select-symbolic"
                 } else {
                     "gh-branch-symbolic"
                 });
+                if remote.is_some() {
+                    icon.add_css_class("dim-label");
+                }
                 row_box.append(&icon);
                 row_box.append(
                     &gtk::Label::builder()
-                        .label(&b.name)
+                        .label(label)
                         .xalign(0.0)
                         .hexpand(true)
                         .ellipsize(gtk::pango::EllipsizeMode::Middle)
                         .build(),
                 );
+                let when = util::relative_time(b.time);
                 row_box.append(
                     &gtk::Label::builder()
-                        .label(util::relative_time(b.time))
+                        .label(match remote {
+                            Some(r) => format!("{r} · {when}"),
+                            None => when,
+                        })
                         .css_classes(["dim-label", "caption"])
                         .build(),
                 );
                 let row = gtk::ListBoxRow::builder().child(&row_box).build();
                 row.set_widget_name(&b.name);
+                if let Some(r) = remote {
+                    row.set_tooltip_text(Some(&format!(
+                        "Only on {r} — switching creates a local branch that tracks it"
+                    )));
+                    remote_rows.insert(b.name.clone());
+                }
                 row.set_sensitive(!b.is_head);
                 list.append(&row);
             }
