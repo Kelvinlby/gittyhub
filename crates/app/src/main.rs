@@ -9,6 +9,7 @@ mod settings;
 mod tree;
 mod util;
 mod views;
+mod watch;
 mod window;
 
 use adw::prelude::*;

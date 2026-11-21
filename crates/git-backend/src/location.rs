@@ -103,13 +103,16 @@ impl Location {
                 cmd.env("GIT_TERMINAL_PROMPT", "0");
                 cmd.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
                 cmd.env("LC_ALL", "C");
+                // Reads must not rewrite the index (`git status` refreshes it otherwise),
+                // or GittyHub's file watcher would see its own refreshes as changes.
+                cmd.env("GIT_OPTIONAL_LOCKS", "0");
                 cmd.envs(env.iter().copied());
                 cmd
             }
             Location::Ssh { host, path } => {
                 let mut cmd = ssh_command(host);
                 let mut line = String::from(
-                    "env GIT_TERMINAL_PROMPT=0 'GIT_SSH_COMMAND=ssh -o BatchMode=yes' LC_ALL=C",
+                    "env GIT_TERMINAL_PROMPT=0 'GIT_SSH_COMMAND=ssh -o BatchMode=yes' LC_ALL=C GIT_OPTIONAL_LOCKS=0",
                 );
                 for (k, v) in env {
                     line.push(' ');

@@ -8,7 +8,7 @@ use adw::prelude::*;
 use git_backend::{Location, PullMode, Status};
 use gtk::{gio, glib};
 
-use crate::{settings, util, views};
+use crate::{settings, util, views, watch};
 
 /// A screen inside a repository tab.
 pub trait View {
@@ -257,6 +257,8 @@ pub struct RepoPage {
     spinner: adw::Spinner,
     minutes_since_fetch: Cell<u32>,
     title_listener: RefCell<Option<Rc<dyn Fn()>>>,
+    /// File monitors that refresh the tab when a local checkout changes on disk.
+    watch: RefCell<Option<Rc<watch::RepoWatch>>>,
 }
 
 impl RepoPage {
@@ -446,6 +448,7 @@ impl RepoPage {
             spinner,
             minutes_since_fetch: Cell::new(0),
             title_listener: RefCell::new(None),
+            watch: RefCell::new(None),
         });
 
         // Wiring
@@ -575,8 +578,60 @@ impl RepoPage {
             ),
         );
 
+        page.start_watching();
         page.refresh();
         page
+    }
+
+    /// Refresh when the repository changes outside GittyHub (another editor, a terminal, an
+    /// agent): file monitors for local checkouts, a light status poll for SSH ones.
+    fn start_watching(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        match &self.ctx.loc {
+            Location::Local(path) => {
+                let w = watch::RepoWatch::new(path.clone(), move || {
+                    if let Some(p) = weak.upgrade()
+                        && p.loaded.get()
+                    {
+                        p.refresh();
+                    }
+                });
+                *self.watch.borrow_mut() = Some(w);
+            }
+            Location::Ssh { .. } => {
+                glib::timeout_add_seconds_local(5, move || {
+                    let Some(p) = weak.upgrade() else {
+                        return glib::ControlFlow::Break;
+                    };
+                    p.poll_remote_status();
+                    glib::ControlFlow::Continue
+                });
+            }
+        }
+    }
+
+    /// For SSH checkouts: re-read status while the tab is on screen, refreshing if it moved.
+    fn poll_remote_status(self: &Rc<Self>) {
+        let active = self
+            .root
+            .root()
+            .and_downcast::<gtk::Window>()
+            .is_some_and(|w| w.is_active());
+        if !active || !self.root.is_mapped() || !self.loaded.get() || self.ctx.busy.get() > 0 {
+            return;
+        }
+        let loc = self.ctx.loc.clone();
+        let weak = Rc::downgrade(self);
+        util::spawn(
+            move || git_backend::status(&loc),
+            move |r| {
+                if let (Some(p), Ok(st)) = (weak.upgrade(), r)
+                    && p.ctx.status.borrow().as_ref() != Some(&st)
+                {
+                    p.refresh();
+                }
+            },
+        );
     }
 
     pub fn widget(&self) -> gtk::Widget {

@@ -49,6 +49,10 @@ A Git client with deep GitHub integration, aiming to grow into sub-IDE-grade sof
   use the full window width (no clamped, doc-style pages).
 - Rewriting history (`git_backend::rewrite`) drives `git rebase -i` via `GIT_SEQUENCE_EDITOR` /
   `GIT_EDITOR` env vars — not `-c core.editor`, which a user's `GIT_EDITOR` would override.
+- Tabs refresh live: local checkouts via `watch::RepoWatch` (gio file monitors on the git dir,
+  `refs/` and non-ignored work-tree dirs, debounced); SSH ones poll `git status` while focused.
+  Git commands run with `GIT_OPTIONAL_LOCKS=0` so our own reads don't rewrite the index and
+  re-trigger the watcher.
 - Every widget that shows code calls `settings::register_code_view` so it follows the code font,
   size and line-spacing preferences.
 - Custom icons live in `crates/app/data/icons` and must be fill-only SVGs (GTK's symbolic

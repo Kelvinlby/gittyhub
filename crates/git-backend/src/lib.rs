@@ -4,6 +4,7 @@
 
 mod location;
 pub mod ssh;
+pub mod watch;
 
 pub use location::{Location, shell_quote, ssh_command};
 
