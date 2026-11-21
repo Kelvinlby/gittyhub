@@ -18,13 +18,19 @@ pub struct DiffView {
     removed: gtk::TextTag,
 }
 
-/// Look up a theme colour by rendering a throwaway label with `class`.
-pub fn theme_color(class: &str) -> gdk::RGBA {
+/// Look up a theme colour by styling a throwaway label with `class` under `anchor`.
+///
+/// The label must sit in the widget tree: libadwaita defines its colours as CSS variables on
+/// the window, so a detached label resolves every class to the plain text colour.
+pub fn theme_color(anchor: &impl IsA<gtk::Widget>, class: &str) -> gdk::RGBA {
     let l = gtk::Label::new(None);
     if !class.is_empty() {
         l.add_css_class(class);
     }
-    l.color()
+    l.set_parent(anchor);
+    let c = l.color();
+    l.unparent();
+    c
 }
 
 pub fn tinted(mut c: gdk::RGBA, alpha: f32) -> gdk::RGBA {
@@ -68,7 +74,13 @@ impl DiffView {
             added,
             removed,
         });
-        view.recolor();
+        // Theme colours only resolve once the view is in the window.
+        let weak = Rc::downgrade(&view);
+        view.root.connect_map(move |_| {
+            if let Some(v) = weak.upgrade() {
+                v.recolor();
+            }
+        });
         let weak = Rc::downgrade(&view);
         adw::StyleManager::default().connect_dark_notify(move |_| {
             if let Some(v) = weak.upgrade() {
@@ -81,9 +93,9 @@ impl DiffView {
 
     fn recolor(&self) {
         self.added
-            .set_paragraph_background_rgba(Some(&tinted(theme_color("success"), 0.16)));
+            .set_paragraph_background_rgba(Some(&tinted(theme_color(&self.root, "success"), 0.16)));
         self.removed
-            .set_paragraph_background_rgba(Some(&tinted(theme_color("error"), 0.16)));
+            .set_paragraph_background_rgba(Some(&tinted(theme_color(&self.root, "error"), 0.16)));
     }
 
     pub fn widget(&self) -> gtk::Widget {

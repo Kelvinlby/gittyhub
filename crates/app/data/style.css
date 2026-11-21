@@ -43,9 +43,16 @@
 .pill-label.warning { color: var(--warning-color); }
 .pill-label.merged { color: var(--purple-3, var(--accent-color)); }
 
-.commit-box {
-  padding: 12px;
-  border-top: 1px solid var(--border-color);
+.commit-card > .commit-header {
+  background: none;
+  padding: 0;
+}
+.commit-card > .commit-header > row {
+  margin: 0;
+  border-radius: 12px;
+}
+.commit-form {
+  padding: 0 10px 10px 10px;
 }
 
 .commit-description {

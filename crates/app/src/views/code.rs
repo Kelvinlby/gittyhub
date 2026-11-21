@@ -1,7 +1,7 @@
 //! The Code screen: an editor-centred view of the repository.
 //!
-//! Left: a timeline (uncommitted changes, commits not yet pushed, pushed history) with a
-//! commit composer. Middle: the files of the selected entry as a folder tree. Right: the
+//! Left: a commit card (uncommitted changes + composer) above a timeline of commits (not yet
+//! pushed, then pushed history). Middle: the files of the selected entry as a folder tree. Right: the
 //! selected file as a diff, a rendered preview, or an editor. Actions live in right-click menus.
 
 use std::cell::{Cell, RefCell};
@@ -34,6 +34,7 @@ pub struct Code {
     ctx: Rc<Ctx>,
     root: adw::BreakpointBin,
     timeline: gtk::ListBox,
+    wt_list: gtk::ListBox,
     search: gtk::SearchEntry,
     more: gtk::Button,
     banner: adw::Banner,
@@ -77,17 +78,18 @@ fn tags() -> gtk::TextTagTable {
     t
 }
 
-/// Colour the diff tags. `fg` must come from a widget in the window, so it follows a
+/// Colour the diff tags. `anchor` must be a widget in the window, so it follows a
 /// colour scheme forced in Preferences.
-fn recolor(t: &gtk::TextTagTable, fg: gdk::RGBA) {
+fn recolor(t: &gtk::TextTagTable, anchor: &gtk::TextView) {
+    let fg = anchor.color();
     if let Some(tag) = t.lookup("added") {
-        tag.set_paragraph_background_rgba(Some(&tinted(theme_color("success"), 0.16)));
+        tag.set_paragraph_background_rgba(Some(&tinted(theme_color(anchor, "success"), 0.16)));
     }
     if let Some(tag) = t.lookup("removed") {
-        tag.set_paragraph_background_rgba(Some(&tinted(theme_color("error"), 0.16)));
+        tag.set_paragraph_background_rgba(Some(&tinted(theme_color(anchor, "error"), 0.16)));
     }
     if let Some(tag) = t.lookup("hunk") {
-        tag.set_paragraph_background_rgba(Some(&tinted(theme_color("accent"), 0.10)));
+        tag.set_paragraph_background_rgba(Some(&tinted(theme_color(anchor, "accent"), 0.10)));
         tag.set_foreground_rgba(Some(&tinted(fg, 0.7)));
     }
     if let Some(tag) = t.lookup("gutter") {
@@ -167,14 +169,16 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         .hexpand(true)
         .build();
     // Adwaita's `.toolbar` gives in-pane bars uniform 6px padding and spacing.
-    let search_bar = util::vbox(6);
-    search_bar.add_css_class("toolbar");
+    let top_bar = util::vbox(6);
+    top_bar.add_css_class("toolbar");
     if let Some(branch) = ctx.branch_button.borrow_mut().take() {
-        search_bar.append(&branch);
+        top_bar.append(&branch);
     }
     if let Some(sync) = ctx.sync_widget.borrow_mut().take() {
-        search_bar.append(&sync);
+        top_bar.append(&sync);
     }
+    let search_bar = util::vbox(6);
+    search_bar.add_css_class("toolbar");
     search_bar.append(&search);
     let banner = adw::Banner::builder().button_label("Abort").build();
     let timeline = gtk::ListBox::builder()
@@ -216,17 +220,32 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         .css_classes(["suggested-action"])
         .build();
     let composer = util::vbox(8);
-    composer.add_css_class("commit-box");
+    composer.add_css_class("commit-form");
     composer.append(&summary);
     composer.append(&desc_scroller);
     composer.append(&amend);
     composer.append(&commit_btn);
 
+    // The uncommitted-changes row and the commit form share one card under the sync buttons.
+    let wt_list = gtk::ListBox::builder()
+        .css_classes(["navigation-sidebar", "commit-header"])
+        .build();
+    let commit_card = util::vbox(0);
+    commit_card.add_css_class("card");
+    commit_card.add_css_class("commit-card");
+    commit_card.append(&wt_list);
+    commit_card.append(&composer);
+    commit_card.set_margin_start(6);
+    commit_card.set_margin_end(6);
+    commit_card.set_margin_bottom(6);
+
     let left = util::vbox(0);
     left.append(&banner);
+    left.append(&top_bar);
+    left.append(&commit_card);
+    left.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     left.append(&search_bar);
     left.append(&scrolled(&tl_box));
-    left.append(&composer);
 
     // ----- Tree column
     let tree_mode = adw::ToggleGroup::builder().css_classes(["round"]).build();
@@ -364,6 +383,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         ctx: ctx.clone(),
         root,
         timeline,
+        wt_list,
         search,
         more,
         banner,
@@ -444,14 +464,26 @@ impl Code {
                 if v.suppress.get() {
                     return;
                 }
-                let name = row.widget_name().to_string();
-                let sel = if name == "worktree" {
-                    Sel::Worktree
-                } else {
-                    Sel::Commit(name)
-                };
+                v.wt_list.unselect_all();
+                let sel = Sel::Commit(row.widget_name().to_string());
                 if *v.sel.borrow() != sel {
                     *v.sel.borrow_mut() = sel;
+                    v.load_selection();
+                }
+            });
+        }
+        {
+            let w = w.clone();
+            self.wt_list.connect_row_selected(move |_, row| {
+                let (Some(v), Some(_)) = (w.upgrade(), row) else {
+                    return;
+                };
+                if v.suppress.get() {
+                    return;
+                }
+                v.timeline.unselect_all();
+                if *v.sel.borrow() != Sel::Worktree {
+                    *v.sel.borrow_mut() = Sel::Worktree;
                     v.load_selection();
                 }
             });
@@ -620,6 +652,7 @@ impl Code {
     fn rebuild_timeline(self: &Rc<Self>) {
         self.suppress.set(true);
         util::clear_rows(&self.timeline);
+        util::clear_rows(&self.wt_list);
         let changes = self.changes_now();
         let n = changes.len();
 
@@ -662,13 +695,12 @@ impl Code {
                 w.upgrade().map(|v| v.worktree_menu()).unwrap_or_default()
             });
         }
-        self.timeline.append(&wt_row);
+        self.wt_list.append(&wt_row);
 
         let unpushed = self.unpushed.borrow().clone();
         let commits = self.commits.borrow().clone();
         let selected = self.sel.borrow().clone();
-        let mut select_row: Option<gtk::ListBoxRow> =
-            (selected == Sel::Worktree).then(|| wt_row.clone());
+        let mut select_row: Option<gtk::ListBoxRow> = None;
         for c in &commits {
             let is_unpushed = unpushed.contains(&c.oid);
             let row = self.commit_row(c, is_unpushed);
@@ -677,13 +709,18 @@ impl Code {
             }
             self.timeline.append(&row);
         }
-        let reselect = select_row.is_some();
-        self.timeline
-            .select_row(Some(&select_row.unwrap_or(wt_row)));
-        self.suppress.set(false);
-        if !reselect {
-            *self.sel.borrow_mut() = Sel::Worktree;
+        match select_row {
+            Some(row) => {
+                self.wt_list.unselect_all();
+                self.timeline.select_row(Some(&row));
+            }
+            None => {
+                self.timeline.unselect_all();
+                self.wt_list.select_row(Some(&wt_row));
+                *self.sel.borrow_mut() = Sel::Worktree;
+            }
         }
+        self.suppress.set(false);
     }
 
     fn commit_row(self: &Rc<Self>, c: &Commit, unpushed: bool) -> gtk::ListBoxRow {
@@ -986,9 +1023,9 @@ impl Code {
                 "{} file{} · <span foreground=\"{}\">+{}</span> <span foreground=\"{}\">−{}</span>",
                 m.files_changed,
                 if m.files_changed == 1 { "" } else { "s" },
-                hex(crate::diff::theme_color("success")),
+                hex(crate::diff::theme_color(&self.details, "success")),
                 m.insertions,
-                hex(crate::diff::theme_color("error")),
+                hex(crate::diff::theme_color(&self.details, "error")),
                 m.deletions
             ))
             .xalign(0.0)
@@ -1334,7 +1371,7 @@ impl Code {
     }
 
     fn render_diff(&self, text: &str) {
-        recolor(&self.tags, self.diff_view.color());
+        recolor(&self.tags, &self.diff_view);
         let file = git_backend::parse_diff(text).into_iter().next();
         let buf = self.diff_view.buffer();
         buf.set_text("");
