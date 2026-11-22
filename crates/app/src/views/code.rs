@@ -180,7 +180,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     search_bar.add_css_class("toolbar");
     search_bar.append(&search);
     let banner = adw::Banner::builder().button_label("Abort").build();
-    // Multiple selection: Shift/Ctrl-click picks a run of commits to squash.
+    // Multiple selection: Shift-click picks a run of commits to squash; a plain click resets.
     let timeline = gtk::ListBox::builder()
         .selection_mode(gtk::SelectionMode::Multiple)
         .css_classes(["navigation-sidebar"])
@@ -476,14 +476,38 @@ impl Code {
             });
         }
         {
+            // Plain click selects one card (the list box's own behaviour), and clicking the only
+            // selected card again deselects it; Shift-click extends the selection to a run.
+            let w = w.clone();
+            let click = gtk::GestureClick::builder()
+                .button(gdk::BUTTON_PRIMARY)
+                .propagation_phase(gtk::PropagationPhase::Capture)
+                .build();
+            click.connect_pressed(move |g, n, _, y| {
+                let Some(v) = w.upgrade() else { return };
+                let mods = g.current_event_state();
+                if n != 1
+                    || mods
+                        .intersects(gdk::ModifierType::SHIFT_MASK | gdk::ModifierType::CONTROL_MASK)
+                {
+                    return;
+                }
+                let Some(row) = v.timeline.row_at_y(y as i32) else {
+                    return;
+                };
+                if row.is_selected() && v.timeline.selected_rows().len() == 1 {
+                    g.set_state(gtk::EventSequenceState::Claimed);
+                    v.select_worktree();
+                }
+            });
+            self.timeline.add_controller(click);
+        }
+        {
             let w = w.clone();
             let click = gtk::GestureClick::new();
             click.connect_released(move |_, _, _, _| {
-                let Some(v) = w.upgrade() else { return };
-                v.timeline.unselect_all();
-                if *v.sel.borrow() != Sel::Worktree {
-                    *v.sel.borrow_mut() = Sel::Worktree;
-                    v.load_selection();
+                if let Some(v) = w.upgrade() {
+                    v.select_worktree();
                 }
             });
             self.wt_label.add_controller(click);
@@ -1006,6 +1030,15 @@ impl Code {
             d.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
             // `<…>` (e.g. "Name <email>") is text in a commit message, not HTML.
             d.append(&crate::markdown::render(&m.body.replace('<', "\\<")));
+        }
+    }
+
+    /// Deselect every commit and show the uncommitted changes.
+    fn select_worktree(self: &Rc<Self>) {
+        self.timeline.unselect_all();
+        if *self.sel.borrow() != Sel::Worktree {
+            *self.sel.borrow_mut() = Sel::Worktree;
+            self.load_selection();
         }
     }
 
