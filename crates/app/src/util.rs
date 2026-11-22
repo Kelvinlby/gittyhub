@@ -434,6 +434,19 @@ pub fn filter_by_name(entry: &gtk::SearchEntry, lists: &[gtk::ListBox]) {
 }
 
 /// Remove all rows from `list`, keeping its placeholder.
+/// The rows of a list box, top to bottom.
+pub fn list_rows(list: &gtk::ListBox) -> Vec<gtk::ListBoxRow> {
+    let mut rows = Vec::new();
+    let mut c = list.first_child();
+    while let Some(w) = c {
+        c = w.next_sibling();
+        if let Ok(row) = w.downcast::<gtk::ListBoxRow>() {
+            rows.push(row);
+        }
+    }
+    rows
+}
+
 pub fn clear_rows(list: &gtk::ListBox) {
     let mut c = list.first_child();
     while let Some(w) = c {

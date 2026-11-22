@@ -67,6 +67,8 @@ pub struct Code {
     editor_path: RefCell<Option<String>>,
     generation: Cell<u64>,
     suppress: Cell<bool>,
+    /// The commit a Shift-click range in the timeline extends from.
+    anchor: RefCell<Option<String>>,
 }
 
 fn tags() -> gtk::TextTagTable {
@@ -421,6 +423,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         editor_path: RefCell::new(None),
         generation: Cell::new(0),
         suppress: Cell::new(false),
+        anchor: RefCell::new(None),
     });
     view.connect();
     view
@@ -476,8 +479,10 @@ impl Code {
             });
         }
         {
-            // Plain click selects one card (the list box's own behaviour), and clicking the only
-            // selected card again deselects it; Shift-click extends the selection to a run.
+            // We handle primary clicks ourselves (GTK's Shift-click doesn't reliably select a
+            // range): a plain click selects one card, or deselects it when it is the only one
+            // selected; Shift-click selects the run from the last plain-clicked card; Ctrl-click
+            // toggles one card.
             let w = w.clone();
             let click = gtk::GestureClick::builder()
                 .button(gdk::BUTTON_PRIMARY)
@@ -485,19 +490,12 @@ impl Code {
                 .build();
             click.connect_pressed(move |g, n, _, y| {
                 let Some(v) = w.upgrade() else { return };
-                let mods = g.current_event_state();
-                if n != 1
-                    || mods
-                        .intersects(gdk::ModifierType::SHIFT_MASK | gdk::ModifierType::CONTROL_MASK)
-                {
-                    return;
-                }
                 let Some(row) = v.timeline.row_at_y(y as i32) else {
                     return;
                 };
-                if row.is_selected() && v.timeline.selected_rows().len() == 1 {
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    v.select_worktree();
+                g.set_state(gtk::EventSequenceState::Claimed);
+                if n == 1 {
+                    v.timeline_click(&row, g.current_event_state());
                 }
             });
             self.timeline.add_controller(click);
@@ -1033,8 +1031,61 @@ impl Code {
         }
     }
 
+    fn timeline_click(self: &Rc<Self>, row: &gtk::ListBoxRow, mods: gdk::ModifierType) {
+        row.grab_focus();
+        let oid = row.widget_name().to_string();
+        if mods.contains(gdk::ModifierType::SHIFT_MASK) {
+            let anchor = self
+                .anchor
+                .borrow()
+                .clone()
+                .or_else(|| match &*self.sel.borrow() {
+                    Sel::Commit(o) => Some(o.clone()),
+                    Sel::Worktree => None,
+                });
+            let rows = util::list_rows(&self.timeline);
+            let at = |o: &str| rows.iter().position(|r| r.widget_name() == o);
+            let (Some(a), Some(b)) = (anchor.as_deref().and_then(at), at(&oid)) else {
+                self.select_only(row);
+                return;
+            };
+            self.suppress.set(true);
+            self.timeline.unselect_all();
+            for r in &rows[a.min(b)..=a.max(b)] {
+                if r != row {
+                    self.timeline.select_row(Some(r));
+                }
+            }
+            self.suppress.set(false);
+            self.timeline.select_row(Some(row));
+        } else if mods.contains(gdk::ModifierType::CONTROL_MASK) {
+            *self.anchor.borrow_mut() = Some(oid);
+            if row.is_selected() {
+                self.timeline.unselect_row(row);
+                if self.timeline.selected_rows().is_empty() {
+                    self.select_worktree();
+                }
+            } else {
+                self.timeline.select_row(Some(row));
+            }
+        } else if row.is_selected() && self.timeline.selected_rows().len() == 1 {
+            self.select_worktree();
+        } else {
+            self.select_only(row);
+        }
+    }
+
+    fn select_only(self: &Rc<Self>, row: &gtk::ListBoxRow) {
+        *self.anchor.borrow_mut() = Some(row.widget_name().to_string());
+        self.suppress.set(true);
+        self.timeline.unselect_all();
+        self.suppress.set(false);
+        self.timeline.select_row(Some(row));
+    }
+
     /// Deselect every commit and show the uncommitted changes.
     fn select_worktree(self: &Rc<Self>) {
+        *self.anchor.borrow_mut() = None;
         self.timeline.unselect_all();
         if *self.sel.borrow() != Sel::Worktree {
             *self.sel.borrow_mut() = Sel::Worktree;
