@@ -180,7 +180,9 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
     search_bar.add_css_class("toolbar");
     search_bar.append(&search);
     let banner = adw::Banner::builder().button_label("Abort").build();
+    // Multiple selection: Shift/Ctrl-click picks a run of commits to squash.
     let timeline = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::Multiple)
         .css_classes(["navigation-sidebar"])
         .build();
     let more = gtk::Button::builder()
@@ -1926,6 +1928,85 @@ impl Code {
         );
     }
 
+    /// The selected commits, newest first, when `clicked` is among two or more selected
+    /// commits forming one contiguous run of the timeline.
+    fn selected_run(&self, clicked: &str) -> Option<Vec<Commit>> {
+        let names: HashSet<String> = self
+            .timeline
+            .selected_rows()
+            .iter()
+            .map(|r| r.widget_name().to_string())
+            .collect();
+        if names.len() < 2 || !names.contains(clicked) || !self.search.text().is_empty() {
+            return None;
+        }
+        let commits = self.commits.borrow();
+        let idx: Vec<usize> = commits
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| names.contains(&c.oid))
+            .map(|(i, _)| i)
+            .collect();
+        let (first, last) = (*idx.first()?, *idx.last()?);
+        (idx.len() == names.len() && last - first + 1 == idx.len())
+            .then(|| commits[first..=last].to_vec())
+    }
+
+    fn squash_selected(self: &Rc<Self>, run: Vec<Commit>) {
+        let ctx = self.ctx.clone();
+        let pushed = {
+            let unpushed = self.unpushed.borrow();
+            run.iter().any(|c| !unpushed.contains(&c.oid))
+        };
+        if run.iter().any(|c| c.parents.len() > 1) {
+            ctx.toast("Cannot squash merge commits");
+            return;
+        }
+        let oldest = run.last().map(|c| c.oid.clone()).unwrap_or_default();
+        let count = run.len();
+        let oids: Vec<String> = run.iter().rev().map(|c| c.oid.clone()).collect();
+        let c2 = ctx.clone();
+        ctx.load(
+            move |l| git_backend::messages_of(l, &oids),
+            move |r| {
+                let messages = r.unwrap_or_default();
+                let ctx = c2;
+                glib::spawn_future_local(async move {
+                    if pushed
+                        && !util::confirm(
+                            &ctx.parent(),
+                            "Rewrite Pushed History?",
+                            "Some of these commits are already on a remote. Rewriting them means you will need to force push, which can disrupt others working on this branch.",
+                            "Squash",
+                            true,
+                        )
+                        .await
+                    {
+                        return;
+                    }
+                    let Some(v) = form::run(
+                        &ctx.parent(),
+                        &format!("Squash {count} Commits"),
+                        "The selected commits become one commit; later commits are kept on top.",
+                        "Squash",
+                        vec![Field::text("Message", messages.trim())],
+                    )
+                    .await
+                    else {
+                        return;
+                    };
+                    let msg = v[0].text();
+                    let c = ctx.clone();
+                    ctx.git(
+                        "Squash",
+                        move |l| git_backend::squash_range(l, &oldest, count, &msg),
+                        move |_| c.toast("Squashed"),
+                    );
+                });
+            },
+        );
+    }
+
     fn commit_menu(self: &Rc<Self>, c: &Commit, unpushed: bool) -> Vec<(String, Callback)> {
         let ctx = self.ctx.clone();
         let oid = c.oid.clone();
@@ -1957,6 +2038,20 @@ impl Code {
             items.push(("Open on GitHub".into(), mk(open_on_github)));
         }
         items.push((String::new(), Rc::new(|| {})));
+        if let Some(run) = self.selected_run(&c.oid) {
+            items.push((
+                format!("Squash {} Selected Commits into One…", run.len()),
+                {
+                    let w = Rc::downgrade(self);
+                    Rc::new(move || {
+                        if let Some(v) = w.upgrade() {
+                            v.squash_selected(run.clone());
+                        }
+                    })
+                },
+            ));
+            items.push((String::new(), Rc::new(|| {})));
+        }
         if unpushed {
             items.push(("Push All Unpushed Commits".into(), {
                 let ctx = ctx.clone();

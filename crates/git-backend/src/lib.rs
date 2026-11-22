@@ -879,6 +879,62 @@ pub fn rewrite(loc: &Location, oid: &str, how: Rewrite) -> Result<()> {
     loc.git_env(&env, &args, None).map(drop)
 }
 
+/// Squash `count` consecutive commits, starting at `oldest` and going towards HEAD, into one
+/// commit with `message`. Later commits are replayed on top (autostashing local changes).
+pub fn squash_range(loc: &Location, oldest: &str, count: usize, message: &str) -> Result<()> {
+    if count < 2 {
+        bail!("select at least two commits to squash");
+    }
+    let base = format!("{oldest}^");
+    let has_base = loc.git_ok(&["rev-parse", "-q", "--verify", &base]);
+    let range = if has_base {
+        format!("{base}..HEAD")
+    } else {
+        "HEAD".into()
+    };
+    let oids = loc.git(&["rev-list", "--reverse", &range])?;
+    let oldest_full = loc.git(&["rev-parse", oldest])?;
+    if oids.lines().next() != Some(oldest_full.trim()) || oids.lines().count() < count {
+        bail!("the selected commits are not a run on the current branch");
+    }
+    if !loc
+        .git(&["rev-list", "--merges", &range])?
+        .trim()
+        .is_empty()
+    {
+        bail!("rewriting history across merge commits is not supported");
+    }
+    let git_dir = loc
+        .git(&["rev-parse", "--absolute-git-dir"])?
+        .trim()
+        .to_owned();
+    let msg_file = format!("{git_dir}/GITTYHUB_SQUASH_MSG");
+    loc.shell(
+        &format!("cat > {}", shell_quote(&msg_file)),
+        Some(message.as_bytes()),
+    )?;
+    let seq = format!("sed -i 2,{count}s/^pick/squash/");
+    let editor = format!("cp {}", shell_quote(&msg_file));
+    let mut args = vec!["rebase", "-i", "--autostash"];
+    if has_base {
+        args.push(&base);
+    } else {
+        args.push("--root");
+    }
+    let env = [
+        ("GIT_SEQUENCE_EDITOR", seq.as_str()),
+        ("GIT_EDITOR", editor.as_str()),
+    ];
+    loc.git_env(&env, &args, None).map(drop)
+}
+
+/// Full messages of `oids`, in the given order, separated by blank lines.
+pub fn messages_of(loc: &Location, oids: &[String]) -> Result<String> {
+    let mut args = vec!["show", "-s", "--no-walk=unsorted", "--format=%B"];
+    args.extend(oids.iter().map(String::as_str));
+    loc.git(&args)
+}
+
 /// Combine all commits after `base` into one new commit with `message`.
 pub fn squash_since(loc: &Location, base: &str, message: &str) -> Result<()> {
     loc.git(&["reset", "--soft", base])?;

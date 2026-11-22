@@ -254,3 +254,30 @@ fn init_defaults_to_main() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn squash_range_in_middle() {
+    let (loc, _dir) = repo("squash-range");
+    for (f, m) in [
+        ("a", "one"),
+        ("b", "two"),
+        ("c", "three"),
+        ("d", "four"),
+        ("e", "five"),
+    ] {
+        commit(&loc, f, f, m);
+    }
+    let two = loc.git(&["rev-parse", "HEAD~3"]).unwrap();
+    let three = loc.git(&["rev-parse", "HEAD~2"]).unwrap();
+    let four = loc.git(&["rev-parse", "HEAD~1"]).unwrap();
+    let msgs = git_backend::messages_of(
+        &loc,
+        &[two.trim().into(), three.trim().into(), four.trim().into()],
+    )
+    .unwrap();
+    assert!(msgs.contains("two") && msgs.contains("four"));
+    git_backend::squash_range(&loc, two.trim(), 3, "combined").unwrap();
+    assert_eq!(subjects(&loc), ["five", "combined", "one"]);
+    let files = loc.git(&["ls-tree", "--name-only", "HEAD~1"]).unwrap();
+    assert_eq!(files.lines().collect::<Vec<_>>(), ["a", "b", "c", "d"]);
+}
