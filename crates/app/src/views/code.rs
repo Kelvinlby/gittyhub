@@ -680,7 +680,8 @@ impl Code {
     fn rebuild_timeline(self: &Rc<Self>) {
         self.suppress.set(true);
         util::clear_rows(&self.timeline);
-        let n = self.changes_now().len();
+        // Same list the tree shows (snapshotted in `refresh`), so the two always agree.
+        let n = self.changes.borrow().len();
         self.wt_label.set_label(&if n == 0 {
             format!("No local changes on {}", self.ctx.branch())
         } else {

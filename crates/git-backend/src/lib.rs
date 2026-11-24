@@ -64,6 +64,16 @@ pub struct Status {
     pub state: RepoState,
 }
 
+/// True when a submodule entry has nothing the superproject can commit: only edits or
+/// untracked files inside the submodule, with its checked-out commit unchanged and nothing
+/// staged. `sub` is porcelain v2's `<sub>` field (`N...` for non-submodules).
+fn submodule_noise(sub: &str, index: char) -> bool {
+    sub.starts_with('S') && sub.chars().nth(1) != Some('C') && index == '.'
+}
+
+/// Parse `git status --porcelain=v2 --branch -z`. Only entries a commit could record are
+/// kept: nested repositories (`?? dir/`) and submodules whose changes live only inside them
+/// are dropped, since git would not track them as files.
 pub fn parse_status(raw: &str) -> (BranchInfo, Vec<FileChange>) {
     let mut branch = BranchInfo::default();
     let mut files = Vec::new();
@@ -94,6 +104,9 @@ pub fn parse_status(raw: &str) -> (BranchInfo, Vec<FileChange>) {
                 let f: Vec<&str> = e.splitn(9, ' ').collect();
                 if f.len() == 9 {
                     let xy: Vec<char> = f[1].chars().collect();
+                    if submodule_noise(f[2], xy[0]) {
+                        continue;
+                    }
                     files.push(FileChange {
                         path: f[8].to_owned(),
                         orig_path: None,
@@ -107,9 +120,13 @@ pub fn parse_status(raw: &str) -> (BranchInfo, Vec<FileChange>) {
                 let f: Vec<&str> = e.splitn(10, ' ').collect();
                 if f.len() == 10 {
                     let xy: Vec<char> = f[1].chars().collect();
+                    let orig_path = entries.next().map(str::to_owned);
+                    if submodule_noise(f[2], xy[0]) {
+                        continue;
+                    }
                     files.push(FileChange {
                         path: f[9].to_owned(),
-                        orig_path: entries.next().map(str::to_owned),
+                        orig_path,
                         index: xy[0],
                         worktree: xy[1],
                         conflicted: false,
@@ -129,6 +146,8 @@ pub fn parse_status(raw: &str) -> (BranchInfo, Vec<FileChange>) {
                     });
                 }
             }
+            // A trailing slash even with `--untracked-files=all` means a nested repository.
+            Some('?') if e.ends_with('/') => {}
             Some('?') => files.push(FileChange {
                 path: e[2..].to_owned(),
                 orig_path: None,
@@ -1676,11 +1695,16 @@ mod tests {
         let raw = "# branch.oid abc\0# branch.head main\0# branch.upstream origin/main\0# branch.ab +2 -1\0\
 1 .M N... 100644 100644 100644 a a src/x.rs\0\
 2 R. N... 100644 100644 100644 a a R100 new name.rs\0old.rs\0\
-u UU N... 100644 100644 100644 100644 a b c conflict.txt\0? new.txt\0";
+u UU N... 100644 100644 100644 100644 a b c conflict.txt\0? new.txt\0\
+1 .M S..U 160000 160000 160000 a a sub-untracked\0\
+1 .M S.M. 160000 160000 160000 a a sub-edited\0\
+1 .M SC.. 160000 160000 160000 a b sub-moved\0? nested/\0";
         let (b, f) = parse_status(raw);
         assert_eq!(b.head, "main");
         assert_eq!((b.ahead, b.behind), (2, 1));
-        assert_eq!(f.len(), 4);
+        // Submodules with only inner changes and the nested repo are left out.
+        assert_eq!(f.len(), 5);
+        assert_eq!(f[4].path, "sub-moved");
         assert!(f[0].unstaged() && !f[0].staged());
         assert_eq!(f[1].path, "new name.rs");
         assert_eq!(f[1].orig_path.as_deref(), Some("old.rs"));
