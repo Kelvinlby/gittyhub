@@ -60,6 +60,9 @@ pub struct Code {
     commits: RefCell<Vec<Commit>>,
     unpushed: RefCell<HashSet<String>>,
     changes: RefCell<Vec<FileChange>>,
+    /// The tree was switched to "All Files" only because there were no changes; switch back
+    /// to "Changes" once some appear.
+    auto_all: Cell<bool>,
     commit_files: RefCell<Vec<CommitFile>>,
     current: RefCell<Option<String>>,
     diff_file: RefCell<Option<DiffFile>>,
@@ -416,6 +419,7 @@ pub fn new(ctx: &Rc<Ctx>) -> Rc<dyn View> {
         commits: RefCell::new(Vec::new()),
         unpushed: RefCell::new(HashSet::new()),
         changes: RefCell::new(Vec::new()),
+        auto_all: Cell::new(false),
         commit_files: RefCell::new(Vec::new()),
         current: RefCell::new(None),
         diff_file: RefCell::new(None),
@@ -796,9 +800,14 @@ impl Code {
 
     fn load_selection(self: &Rc<Self>) {
         let is_wt = *self.sel.borrow() == Sel::Worktree;
-        if is_wt && self.changes.borrow().is_empty() {
-            self.tree_mode.set_active_name(Some("all"));
-        } else if !is_wt {
+        let empty = self.changes.borrow().is_empty();
+        if is_wt && empty {
+            if self.tree_mode.active_name().as_deref() != Some("all") {
+                self.auto_all.set(true);
+                self.tree_mode.set_active_name(Some("all"));
+            }
+        } else if !is_wt || self.auto_all.get() {
+            self.auto_all.set(false);
             self.tree_mode.set_active_name(Some("changes"));
         }
         self.show_details();
