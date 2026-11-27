@@ -4,6 +4,7 @@ mod form;
 mod markdown;
 mod open;
 mod prefs;
+mod proxy;
 mod repo;
 mod settings;
 mod tree;
@@ -18,6 +19,7 @@ use gtk::{gdk, gio, glib};
 const APP_ID: &str = "io.github.Kelvinlby.GittyHub";
 
 fn main() -> glib::ExitCode {
+    proxy::apply_gnome_proxy();
     gio::resources_register_include!("gittyhub.gresource").expect("bundled resources");
     let app = adw::Application::builder()
         .application_id(APP_ID)
